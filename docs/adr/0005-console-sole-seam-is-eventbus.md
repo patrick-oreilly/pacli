@@ -1,0 +1,3 @@
+# 0005: Console's sole seam is the EventBus
+
+The Console previously held a direct Orchestrator reference to submit prompts (a synchronous method call), contradicting the event-driven architecture in ADR-0004. We removed the Orchestrator dependency and now route user input through the EventBus: Console emits `"prompt_submitted"`, Orchestrator subscribes. Console's only external seam is the EventBus. As a side effect, `EventBus.emit()` became `async` with coroutine-aware handler dispatch to support bidirectional event traffic.

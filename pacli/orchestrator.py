@@ -1,12 +1,14 @@
-from typing import AsyncIterator
-
+from pacli.events import EventBus
 from pacli.provider import Provider
 
 
 class Orchestrator:
-    def __init__(self, provider: Provider) -> None:
+    def __init__(self, provider: Provider, event_bus: EventBus) -> None:
         self._provider = provider
+        self._event_bus = event_bus
 
-    async def process_prompt(self, prompt: str) -> AsyncIterator[str]:
+    async def process_prompt(self, prompt: str) -> None:
+        self._event_bus.emit("stream_started")
         async for token in self._provider.stream_completion(prompt):
-            yield token
+            self._event_bus.emit("token_received", token)
+        self._event_bus.emit("stream_finished")

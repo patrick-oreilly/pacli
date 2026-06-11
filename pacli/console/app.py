@@ -44,28 +44,35 @@ class Console(App):
     ) -> None:
         super().__init__()
         self._orchestrator = orchestrator
-        if event_bus:
-            event_bus.on("stream_started", self._on_stream_started)
-            event_bus.on("token_received", self._on_token_received)
-            event_bus.on("stream_finished", self._on_stream_finished)
+        self._event_bus = event_bus
+        self._rich_log: Optional[RichLog] = None
+        self._thinking: Optional[Static] = None
 
     def compose(self):
         yield Static(id="thinking", classes="hidden")
         yield RichLog()
         yield Input()
 
+    def on_mount(self):
+        self._rich_log = self.query_one(RichLog)
+        self._thinking = self.query_one("#thinking")
+        if self._event_bus:
+            self._event_bus.on("stream_started", self._on_stream_started)
+            self._event_bus.on("token_received", self._on_token_received)
+            self._event_bus.on("stream_finished", self._on_stream_finished)
+
     def _on_stream_started(self, data):
-        self.query_one("#thinking").remove_class("hidden")
+        self._thinking.remove_class("hidden")
 
     def _on_token_received(self, token):
-        self.query_one(RichLog).write(token)
+        self._rich_log.write(token)
 
     def _on_stream_finished(self, data):
-        self.query_one("#thinking").add_class("hidden")
+        self._thinking.add_class("hidden")
 
     async def on_input_submitted(self, event: Input.Submitted):
         if self._orchestrator:
             await self._orchestrator.process_prompt(event.value)
         else:
-            self.query_one(RichLog).write("Hello from pacli!")
+            self._rich_log.write("Hello from pacli!")
         event.input.value = ""

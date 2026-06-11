@@ -9,6 +9,8 @@ class Orchestrator:
 
     async def process_prompt(self, prompt: str) -> None:
         self._event_bus.emit("stream_started")
-        async for token in self._provider.stream_completion(prompt):
-            self._event_bus.emit("token_received", token)
-        self._event_bus.emit("stream_finished")
+        try:
+            async for token in self._provider.stream_completion(prompt):
+                self._event_bus.emit("token_received", token)
+        finally:
+            self._event_bus.emit("stream_finished")

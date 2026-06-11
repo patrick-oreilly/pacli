@@ -1,5 +1,5 @@
 import pytest
-from textual.widgets import Input, RichLog, Static
+from textual.widgets import Input, RichLog
 from pacli.adapters.mock import MockAdapter
 from pacli.console.app import Console
 from pacli.events import EventBus
@@ -38,7 +38,7 @@ async def test_console_streams_tokens_via_events():
         assert any("MockAdapter" in str(line) for line in output.lines)
 
 
-async def test_thinking_indicator_starts_and_ends_hidden():
+async def test_thinking_indicator_shows_during_streaming_and_hides_after():
     bus = EventBus()
     adapter = MockAdapter()
     orchestrator = Orchestrator(provider=adapter, event_bus=bus)
@@ -46,7 +46,17 @@ async def test_thinking_indicator_starts_and_ends_hidden():
     async with app.run_test() as pilot:
         thinking = app.query_one("#thinking")
         assert "hidden" in thinking.classes
+
+        visible_during_stream = False
+
+        def check_visible(data):
+            nonlocal visible_during_stream
+            visible_during_stream = "hidden" not in thinking.classes
+
+        bus.on("stream_started", check_visible)
+
         input_widget = app.query_one(Input)
         input_widget.focus()
         await pilot.press("enter")
+        assert visible_during_stream, "thinking indicator should be visible during streaming"
         assert "hidden" in thinking.classes

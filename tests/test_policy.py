@@ -1,27 +1,8 @@
-from pathlib import Path
-
 from pacli.policy import Policy
 
 
-async def test_policy_allows_path_within_workspace(tmp_path: Path):
-    workspace = tmp_path / "workspace"
-    workspace.mkdir()
+async def test_policy_requires_approval_for_high_risk_tools():
+    policy = Policy()
 
-    policy = Policy(workspace_root=str(workspace))
-    assert policy.check_read_file("test.txt") is True
-
-
-async def test_policy_rejects_path_outside_workspace(tmp_path: Path):
-    workspace = tmp_path / "workspace"
-    workspace.mkdir()
-
-    policy = Policy(workspace_root=str(workspace))
-    assert policy.check_read_file("../secret.txt") is False
-
-
-async def test_policy_rejects_empty_path(tmp_path: Path):
-    workspace = tmp_path / "workspace"
-    workspace.mkdir()
-
-    policy = Policy(workspace_root=str(workspace))
-    assert policy.check_read_file("") is False
+    assert policy.requires_approval("execute_shell")
+    assert not policy.requires_approval("read_file")

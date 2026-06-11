@@ -1,6 +1,4 @@
-def main():
-    print("Hello from pacli!")
-
+from pacli.main import main
 
 if __name__ == "__main__":
     main()

@@ -81,7 +81,6 @@ async def test_orchestrator_emits_approval_required_for_high_risk_tool():
     assert events[0]["command"] == "echo hi"
     assert "id" in events[0]
 
-    # Clean up: approve so task doesn't hang
     await bus.emit("approval_response", {"id": events[0]["id"], "approved": False})
     await task
     orchestrator.cleanup()

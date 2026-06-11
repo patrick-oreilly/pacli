@@ -87,7 +87,6 @@ class Console(App):
         self._rich_log.write(f"! Approval required: {detail}? (y/n)")
         if approval_id := data.get("id"):
             self._pending_approvals[approval_id] = data
-
     async def on_input_submitted(self, event: Input.Submitted):
         if self._pending_approvals:
             text = event.value.strip().lower()

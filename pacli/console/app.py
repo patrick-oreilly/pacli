@@ -60,6 +60,7 @@ class Console(App):
             self._event_bus.on("stream_started", self._on_stream_started)
             self._event_bus.on("token_received", self._on_token_received)
             self._event_bus.on("stream_finished", self._on_stream_finished)
+            self._event_bus.on("tool_result", self._on_tool_result)
 
     def _on_stream_started(self, data):
         self._thinking.remove_class("hidden")
@@ -69,6 +70,12 @@ class Console(App):
 
     def _on_stream_finished(self, data):
         self._thinking.add_class("hidden")
+
+    def _on_tool_result(self, data):
+        if "error" in data:
+            self._rich_log.write(f"[error] {data['error']}")
+        else:
+            self._rich_log.write(f"[tool] {data['result']}")
 
     async def on_input_submitted(self, event: Input.Submitted):
         if self._orchestrator:

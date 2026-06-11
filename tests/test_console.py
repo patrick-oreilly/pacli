@@ -38,6 +38,15 @@ async def test_console_streams_tokens_via_events():
         assert any("MockAdapter" in str(line) for line in output.lines)
 
 
+async def test_console_displays_tool_result():
+    bus = EventBus()
+    app = Console(event_bus=bus)
+    async with app.run_test() as pilot:
+        bus.emit("tool_result", {"tool": "read_file", "result": "file content here"})
+        output = app.query_one(RichLog)
+        assert any("file content here" in str(line) for line in output.lines)
+
+
 async def test_thinking_indicator_shows_during_streaming_and_hides_after():
     bus = EventBus()
     adapter = MockAdapter()

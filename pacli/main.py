@@ -46,6 +46,6 @@ def main():
 
     bus.on("prompt_submitted", orchestrator.process_prompt)
 
-    app = Console(event_bus=bus)
+    app = Console(event_bus=bus, model=cfg.model)
     app.run()
     orchestrator.cleanup()

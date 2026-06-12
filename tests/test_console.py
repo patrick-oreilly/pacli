@@ -564,3 +564,51 @@ async def test_system_fault_clears_input_box(tmp_path: Path):
             assert input_widget.value == ""
     finally:
         Console._crash_log_path = original
+
+
+async def test_user_prompt_renders_with_prefix_and_color():
+    bus = EventBus()
+    app = Console(event_bus=bus)
+    async with app.run_test() as pilot:
+        await bus.emit("prompt_submitted", "hello world")
+        output = app.query_one(RichLog)
+        assert len(output.lines) > 0
+
+        found = False
+        for line in output.lines:
+            line_str = str(line)
+            if "hello world" in line_str:
+                assert "> hello world" in line_str
+                found = True
+                break
+        assert found
+
+
+async def test_user_prompt_has_blank_line_separator():
+    bus = EventBus()
+    app = Console(event_bus=bus)
+    async with app.run_test() as pilot:
+        await bus.emit("prompt_submitted", "first")
+        await bus.emit("prompt_submitted", "second")
+        output = app.query_one(RichLog)
+        output_text = "\n".join(str(line) for line in output.lines)
+        assert "> first" in output_text
+        assert "> second" in output_text
+
+
+async def test_boot_telemetry_writes_header_with_cyan_dot():
+    app = Console()
+    async with app.run_test() as pilot:
+        output = app.query_one(RichLog)
+        output_text = "\n".join(str(line) for line in output.lines)
+        assert "pacli v0.1.0" in output_text
+
+
+async def test_boot_telemetry_writes_context_line_with_model_dir_branch():
+    app = Console(model="MockAdapter")
+    async with app.run_test() as pilot:
+        output = app.query_one(RichLog)
+        output_text = "\n".join(str(line) for line in output.lines)
+        assert "model: MockAdapter" in output_text
+        assert "· dir:" in output_text
+        assert "· branch:" in output_text

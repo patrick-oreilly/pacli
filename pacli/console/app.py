@@ -1,4 +1,6 @@
 import asyncio
+import os
+import subprocess
 from pathlib import Path
 from typing import Any, Optional
 
@@ -9,6 +11,7 @@ from textual.binding import Binding
 from textual.widgets import Input, RichLog, Static
 from textual.timer import Timer
 
+from pacli import __version__
 from pacli.events import EventBus
 
 BRAILLE_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
@@ -30,6 +33,11 @@ class Console(App):
         padding: 1;
         border: none;
         background: #0A0A0F;
+        scrollbar-size-vertical: 1;
+        scrollbar-background: #0A0A0F;
+        scrollbar-color: #2A2A2A;
+        scrollbar-color-hover: #5A5A5A;
+        scrollbar-color-active: #888888;
     }
 
     Input {
@@ -37,6 +45,10 @@ class Console(App):
         margin: 1 8;
         border: none;
         border-bottom: tall $accent;
+    }
+
+    Input > .input--cursor {
+        background: $accent;
     }
 
     #thinking {
@@ -71,9 +83,11 @@ class Console(App):
     def __init__(
         self,
         event_bus: Optional[EventBus] = None,
+        model: Optional[str] = None,
     ) -> None:
         super().__init__()
         self._event_bus = event_bus
+        self._model = model or "mock"
         self._rich_log: Optional[RichLog] = None
         self._thinking: Optional[Static] = None
         self._hud: Optional[Static] = None
@@ -103,6 +117,7 @@ class Console(App):
         self._rich_log = self.query_one(RichLog)
         self._thinking = self.query_one("#thinking")
         self._hud = self.query_one("#hud")
+        self._write_boot_telemetry()
         self.set_interval(0.2, self._check_scroll)
         if self._event_bus:
             self._event_bus.on("stream_started", self._on_stream_started)
@@ -114,6 +129,7 @@ class Console(App):
             self._event_bus.on("prompt_error", self._on_prompt_error)
             self._event_bus.on("system_event", self._on_system_event)
             self._event_bus.on("system_fault", self._on_system_fault)
+            self._event_bus.on("prompt_submitted", self._on_prompt_submitted)
 
     def _check_scroll(self):
         if not self._rich_log:
@@ -368,6 +384,38 @@ class Console(App):
             return
         self._spinner_frame = (self._spinner_frame + 1) % len(BRAILLE_FRAMES)
         self._thinking.update(BRAILLE_FRAMES[self._spinner_frame])
+
+    def _write_boot_telemetry(self) -> None:
+        if not self._rich_log:
+            return
+        self._rich_log.write(f"[#00F0FF]●[/#00F0FF] [white]pacli v{__version__}[/white]")
+
+        cwd = os.getcwd()
+        branch = self._get_git_branch()
+        self._rich_log.write(
+            f"[dim #888888]model: {self._model} · dir: {cwd} · branch: {branch}[/dim #888888]"
+        )
+
+    @staticmethod
+    def _get_git_branch() -> str:
+        try:
+            result = subprocess.run(
+                ["git", "branch", "--show-current"],
+                capture_output=True,
+                text=True,
+                timeout=5,
+            )
+            branch = result.stdout.strip()
+            return branch or "unknown"
+        except Exception:
+            return "unknown"
+
+    def _on_prompt_submitted(self, text: str) -> None:
+        if not self._rich_log:
+            return
+        self._rich_log.write("")
+        prompt_text = Text(f"> {text}", style="#D0D0D0")
+        self._rich_log.write(prompt_text)
 
     async def on_input_submitted(self, event: Input.Submitted):
         if self._error_active:

@@ -27,6 +27,11 @@ class Console(App):
         height: 1fr;
         padding: 1;
         border: none;
+        scrollbar-size-vertical: 1;
+        scrollbar-background: #0A0A0F;
+        scrollbar-color: #2A2A2A;
+        scrollbar-color-hover: #5A5A5A;
+        scrollbar-color-active: #888888;
     }
 
     Input {

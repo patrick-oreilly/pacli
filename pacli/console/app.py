@@ -1,5 +1,4 @@
 import asyncio
-from pathlib import Path
 from typing import Any, Optional
 
 from rich.align import Align
@@ -73,37 +72,47 @@ class Console(App):
             self._event_bus.on("stream_started", self._on_stream_started)
             self._event_bus.on("token_received", self._on_token_received)
             self._event_bus.on("stream_finished", self._on_stream_finished)
+            self._event_bus.on("tool_used", self._on_tool_used)
             self._event_bus.on("tool_result", self._on_tool_result)
             self._event_bus.on("approval_required", self._on_approval_required)
             self._event_bus.on("prompt_error", self._on_prompt_error)
             self._event_bus.on("system_event", self._on_system_event)
 
     def _on_stream_started(self, data):
-        self._stop_spinner()
+        self._start_spinner()
 
     def _on_token_received(self, token):
         self._rich_log.write(token)
 
     def _on_stream_finished(self, data):
-        self._start_spinner()
+        self._stop_spinner()
 
-    def _on_tool_result(self, data):
+    def _on_tool_used(self, data):
         tool = data.get("tool", "unknown")
         args = data.get("args", {})
         args_repr = ", ".join(f"{k}={v!r}" for k, v in args.items())
-        call_line = f"▶ {tool}({args_repr})" if args_repr else f"▶ {tool}"
+        call_line = f"▸ {tool}({args_repr})" if args_repr else f"▸ {tool}"
+        self._rich_log.write(Text(call_line, style="dim #888888"))
+
+    def _on_tool_result(self, data):
+        tool = data.get("tool", "unknown")
+        if tool == "_loop":
+            return
+        args = data.get("args", {})
+        args_repr = ", ".join(f"{k}={v!r}" for k, v in args.items())
+        call_line = f"  ▶ {tool}({args_repr})" if args_repr else f"  ▶ {tool}"
 
         if "error" in data:
             error = data["error"]
             is_denied = error == "Approval denied by user"
             if is_denied:
-                line = f"  {call_line} → [denied]"
+                line = f"{call_line} → [denied]"
                 self._rich_log.write(Text(line, style="dim #888888"))
             else:
-                line = f"  {call_line} → [exit 1]"
+                line = f"{call_line} → [exit 1]"
                 self._rich_log.write(Text(line, style="bold #FF8C00"))
         else:
-            line = f"  {call_line} → [exit 0]"
+            line = f"{call_line} → [exit 0]"
             self._rich_log.write(Text(line, style="dim #888888"))
 
     def _on_system_event(self, data: dict[str, Any]) -> None:

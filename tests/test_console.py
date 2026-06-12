@@ -114,22 +114,22 @@ async def test_thinking_indicator_shows_during_streaming_and_hides_after():
         input_widget.focus()
         await pilot.press("enter")
 
-        # After streaming finishes, the spinner should be visible
-        assert "hidden" not in thinking.classes, "thinking indicator should be visible after stream finished"
+        # After streaming finishes, the spinner should be hidden
+        assert "hidden" in thinking.classes, "thinking indicator should be hidden after stream finished"
 
-        # Spinner should hide when the next stream_started fires
-        hidden_on_stream_started = False
+        # Spinner should show when the next stream_started fires
+        shown_on_stream_started = False
 
-        def check_hidden(data):
-            nonlocal hidden_on_stream_started
-            hidden_on_stream_started = "hidden" in thinking.classes
+        def check_shown(data):
+            nonlocal shown_on_stream_started
+            shown_on_stream_started = "hidden" not in thinking.classes
 
-        bus.on("stream_started", check_hidden)
+        bus.on("stream_started", check_shown)
 
         input_widget.focus()
         input_widget.value = "again"
         await pilot.press("enter")
-        assert hidden_on_stream_started, "thinking indicator should hide on next stream_started"
+        assert shown_on_stream_started, "thinking indicator should show on stream_started"
 
 
 async def test_console_shows_approval_prompt_when_approval_required():
@@ -328,3 +328,23 @@ async def test_slash_command_unknown_displays_message():
         output = app.query_one(RichLog)
         output_text = "\n".join(str(line) for line in output.lines)
         assert "unknown command" in output_text
+
+
+async def test_tool_used_renders_compact_inline():
+    bus = EventBus()
+    app = Console(event_bus=bus)
+    async with app.run_test() as pilot:
+        await bus.emit("tool_used", {"tool": "execute_shell", "args": {"command": "npm test"}, "id": "tc1"})
+        output = app.query_one(RichLog)
+        output_text = "\n".join(str(line) for line in output.lines)
+        assert "▸ execute_shell(command='npm test')" in output_text
+
+
+async def test_tool_result_skips_loop_events():
+    bus = EventBus()
+    app = Console(event_bus=bus)
+    async with app.run_test() as pilot:
+        await bus.emit("tool_result", {"tool": "_loop", "args": {}, "error": "Exceeded max iterations (20)"})
+        output = app.query_one(RichLog)
+        output_text = "\n".join(str(line) for line in output.lines)
+        assert "Exceeded max iterations" not in output_text

@@ -6,7 +6,7 @@ from pacli.events import EventBus
 from pacli.local_sandbox import LocalSandbox
 from pacli.orchestrator import Orchestrator
 from pacli.policy import Policy
-from pacli.provider import TextToken
+from pacli.provider import Message, TextToken, ToolCall
 from pacli.tool_registry import ToolRegistry
 from pacli.tools.execute_shell import ExecuteShellTool
 from pacli.tools.read_file import ReadFileTool
@@ -243,3 +243,157 @@ async def test_slash_command_unknown_provider():
     assert len(system_events) == 1
     assert "unknown provider" in system_events[0]["message"]
     orchestrator.cleanup()
+
+
+async def test_process_prompt_loops_with_tool_calls():
+    bus = EventBus()
+
+    class StubProvider:
+        def __init__(self):
+            self.call_count = 0
+
+        async def stream_completion(self, messages, tool_schemas=None):
+            self.call_count += 1
+            if self.call_count == 1:
+                yield ToolCall(id="tc1", name="read_file", args={"path": "test.txt"})
+            else:
+                yield TextToken(text="final response")
+
+    tool_registry = ToolRegistry()
+
+    class StubReadFile:
+        name = "read_file"
+        schema = {"type": "function", "function": {"name": "read_file"}}
+
+        async def __call__(self, path: str) -> str:
+            return "file content"
+
+    tool_registry.register_tool(StubReadFile())
+
+    events = []
+    bus.on("stream_started", lambda d: events.append(("stream_started",)))
+    bus.on("stream_finished", lambda d: events.append(("stream_finished",)))
+    bus.on("tool_used", lambda d: events.append(("tool_used", d)))
+    bus.on("tool_result", lambda d: events.append(("tool_result", d)))
+    bus.on("token_received", lambda d: events.append(("token_received", d.text)))
+
+    orchestrator = Orchestrator(provider=StubProvider(), event_bus=bus, tool_registry=tool_registry)
+    await orchestrator.process_prompt("read test.txt")
+
+    assert events[0] == ("stream_started",)
+    assert events[1] == ("tool_used", {"tool": "read_file", "args": {"path": "test.txt"}, "id": "tc1"})
+    assert events[2] == ("tool_result", {"tool": "read_file", "args": {"path": "test.txt"}, "result": "file content"})
+    assert events[3] == ("token_received", "final response")
+    assert events[4] == ("stream_finished",)
+    assert len(events) == 5
+
+
+async def test_process_prompt_max_iterations_guard():
+    bus = EventBus()
+
+    class StubProvider:
+        async def stream_completion(self, messages, tool_schemas=None):
+            yield ToolCall(id="tc1", name="read_file", args={"path": "x"})
+
+    tool_registry = ToolRegistry()
+
+    class StubReadFile:
+        name = "read_file"
+        schema = {"type": "function", "function": {"name": "read_file"}}
+
+        async def __call__(self, path: str) -> str:
+            return "content"
+
+    tool_registry.register_tool(StubReadFile())
+
+    results = []
+    bus.on("tool_result", lambda d: results.append(d))
+
+    orchestrator = Orchestrator(provider=StubProvider(), event_bus=bus, tool_registry=tool_registry, loop_max_iterations=3)
+    await orchestrator.process_prompt("test")
+
+    max_events = [r for r in results if r.get("tool") == "_loop"]
+    assert len(max_events) == 1
+    assert "Exceeded max iterations" in max_events[0]["error"]
+
+
+async def test_process_prompt_tool_exception_produces_tool_message():
+    bus = EventBus()
+
+    class StubProvider:
+        def __init__(self):
+            self.call_count = 0
+
+        async def stream_completion(self, messages, tool_schemas=None):
+            self.call_count += 1
+            if self.call_count == 1:
+                yield ToolCall(id="tc1", name="read_file", args={"path": "missing.txt"})
+            else:
+                if len(messages) >= 3:
+                    tool_msg = messages[2]
+                    assert tool_msg.role == "tool"
+                    assert "Error:" in tool_msg.content or "error" in tool_msg.content.lower()
+                yield TextToken(text="recovered")
+
+    tool_registry = ToolRegistry()
+
+    class StubReadFile:
+        name = "read_file"
+        schema = {"type": "function", "function": {"name": "read_file"}}
+
+        async def __call__(self, path: str) -> str:
+            raise RuntimeError("Boom!")
+
+    tool_registry.register_tool(StubReadFile())
+
+    events = []
+    bus.on("stream_started", lambda d: events.append("stream_started"))
+    bus.on("stream_finished", lambda d: events.append("stream_finished"))
+    bus.on("token_received", lambda d: events.append(("token_received", d.text)))
+
+    orchestrator = Orchestrator(provider=StubProvider(), event_bus=bus, tool_registry=tool_registry)
+    await orchestrator.process_prompt("test")
+
+    assert "stream_started" in events
+    assert "stream_finished" in events
+    assert ("token_received", "recovered") in events
+
+
+async def test_process_prompt_stream_started_finished_span_entire_loop():
+    bus = EventBus()
+
+    class StubProvider:
+        def __init__(self):
+            self.call_count = 0
+
+        async def stream_completion(self, messages, tool_schemas=None):
+            self.call_count += 1
+            if self.call_count == 1:
+                yield ToolCall(id="tc1", name="read_file", args={"path": "a"})
+            elif self.call_count == 2:
+                yield ToolCall(id="tc2", name="read_file", args={"path": "b"})
+            else:
+                yield TextToken(text="done")
+
+    tool_registry = ToolRegistry()
+
+    class StubReadFile:
+        name = "read_file"
+        schema = {"type": "function", "function": {"name": "read_file"}}
+
+        async def __call__(self, path: str) -> str:
+            return f"content of {path}"
+
+    tool_registry.register_tool(StubReadFile())
+
+    events = []
+    bus.on("stream_started", lambda d: events.append("stream_started"))
+    bus.on("stream_finished", lambda d: events.append("stream_finished"))
+
+    orchestrator = Orchestrator(provider=StubProvider(), event_bus=bus, tool_registry=tool_registry)
+    await orchestrator.process_prompt("test")
+
+    assert events.count("stream_started") == 1
+    assert events.count("stream_finished") == 1
+    assert events[0] == "stream_started"
+    assert events[-1] == "stream_finished"

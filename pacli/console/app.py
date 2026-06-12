@@ -81,10 +81,23 @@ class Console(App):
         self._start_spinner()
 
     def _on_tool_result(self, data):
+        tool = data.get("tool", "unknown")
+        args = data.get("args", {})
+        args_repr = ", ".join(f"{k}={v!r}" for k, v in args.items())
+        call_line = f"▶ {tool}({args_repr})" if args_repr else f"▶ {tool}"
+
         if "error" in data:
-            self._rich_log.write(f"[error] {data['error']}")
+            error = data["error"]
+            is_denied = error == "Approval denied by user"
+            if is_denied:
+                line = f"  {call_line} → [denied]"
+                self._rich_log.write(Text(line, style="dim #888888"))
+            else:
+                line = f"  {call_line} → [exit 1]"
+                self._rich_log.write(Text(line, style="bold #FF8C00"))
         else:
-            self._rich_log.write(f"[tool] {data['result']}")
+            line = f"  {call_line} → [exit 0]"
+            self._rich_log.write(Text(line, style="dim #888888"))
 
     def _on_system_event(self, data: dict[str, Any]) -> None:
         message = data.get("message", "")

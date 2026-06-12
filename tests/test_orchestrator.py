@@ -48,7 +48,7 @@ async def test_orchestrator_executes_tool_and_emits_result(tmp_path: Path):
     orchestrator = Orchestrator(provider=MockAdapter(), event_bus=bus, tool_registry=tool_registry)
     await orchestrator.execute_tool("read_file", path="test.txt")
 
-    assert results == [{"tool": "read_file", "result": "file content"}]
+    assert results == [{"tool": "read_file", "args": {"path": "test.txt"}, "result": "file content"}]
 
 
 async def test_orchestrator_emits_approval_required_for_high_risk_tool():
@@ -123,6 +123,7 @@ async def test_orchestrator_executes_high_risk_tool_after_approval():
 
     assert len(results) == 1
     assert results[0]["tool"] == "execute_shell"
+    assert results[0]["args"] == {"command": "echo hi"}
     assert results[0]["result"] == "executed: echo hi"
     orchestrator.cleanup()
 

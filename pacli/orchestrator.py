@@ -51,14 +51,14 @@ class Orchestrator:
                 approved = False
             if not approved:
                 await self._event_bus.emit(
-                    "tool_result", {"tool": tool_name, "error": "Approval denied by user"}
+                    "tool_result", {"tool": tool_name, "args": kwargs, "error": "Approval denied by user"}
                 )
                 return
         try:
             result = await self._tool_registry.execute_tool(tool_name, **kwargs)
-            await self._event_bus.emit("tool_result", {"tool": tool_name, "result": result})
+            await self._event_bus.emit("tool_result", {"tool": tool_name, "args": kwargs, "result": result})
         except Exception as e:
-            await self._event_bus.emit("tool_result", {"tool": tool_name, "error": str(e)})
+            await self._event_bus.emit("tool_result", {"tool": tool_name, "args": kwargs, "error": str(e)})
 
     async def process_prompt(self, prompt: str) -> None:
         if prompt.startswith("/"):

@@ -48,9 +48,55 @@ async def test_console_displays_tool_result():
     bus = EventBus()
     app = Console(event_bus=bus)
     async with app.run_test() as pilot:
-        await bus.emit("tool_result", {"tool": "read_file", "result": "file content here"})
+        await bus.emit("tool_result", {"tool": "read_file", "args": {"path": "test.txt"}, "result": "file content here"})
         output = app.query_one(RichLog)
-        assert any("file content here" in str(line) for line in output.lines)
+        output_text = "\n".join(str(line) for line in output.lines)
+        assert "▶ read_file(path='test.txt')" in output_text
+        assert "→ [exit 0]" in output_text
+
+
+async def test_tool_result_success_shows_dim_exit_zero():
+    bus = EventBus()
+    app = Console(event_bus=bus)
+    async with app.run_test() as pilot:
+        await bus.emit("tool_result", {"tool": "execute_shell", "args": {"command": "echo hi"}, "result": "hi\n"})
+        output = app.query_one(RichLog)
+        output_text = "\n".join(str(line) for line in output.lines)
+        assert "▶ execute_shell(command='echo hi')" in output_text
+        assert "→ [exit 0]" in output_text
+
+
+async def test_tool_result_error_shows_amber_exit_one():
+    bus = EventBus()
+    app = Console(event_bus=bus)
+    async with app.run_test() as pilot:
+        await bus.emit("tool_result", {"tool": "execute_shell", "args": {"command": "rm --no-preserve-root /"}, "error": "Permission denied"})
+        output = app.query_one(RichLog)
+        output_text = "\n".join(str(line) for line in output.lines)
+        assert "▶ execute_shell(command='rm --no-preserve-root /')" in output_text
+        assert "→ [exit 1]" in output_text
+
+
+async def test_tool_result_denied_shows_dim_denied():
+    bus = EventBus()
+    app = Console(event_bus=bus)
+    async with app.run_test() as pilot:
+        await bus.emit("tool_result", {"tool": "execute_shell", "args": {"command": "rm -rf /"}, "error": "Approval denied by user"})
+        output = app.query_one(RichLog)
+        output_text = "\n".join(str(line) for line in output.lines)
+        assert "▶ execute_shell(command='rm -rf /')" in output_text
+        assert "→ [denied]" in output_text
+
+
+async def test_tool_result_no_args_shows_tool_name_only():
+    bus = EventBus()
+    app = Console(event_bus=bus)
+    async with app.run_test() as pilot:
+        await bus.emit("tool_result", {"tool": "unknown_tool", "result": "ok"})
+        output = app.query_one(RichLog)
+        output_text = "\n".join(str(line) for line in output.lines)
+        assert "▶ unknown_tool" in output_text
+        assert "→ [exit 0]" in output_text
 
 
 async def test_thinking_indicator_shows_during_streaming_and_hides_after():

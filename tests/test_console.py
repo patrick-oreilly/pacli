@@ -1,4 +1,4 @@
-from textual.widgets import Input, RichLog
+from textual.widgets import Input, RichLog, Static
 from pacli.adapters.mock import MockAdapter
 from pacli.console.app import Console
 from pacli.events import EventBus
@@ -127,3 +127,58 @@ async def test_console_emits_denied_on_n_input():
         assert len(responses) == 1
         assert responses[0]["id"] == "test-3"
         assert responses[0]["approved"] is False
+
+
+async def test_hud_widget_exists_and_starts_hidden():
+    bus = EventBus()
+    app = Console(event_bus=bus)
+    async with app.run_test() as pilot:
+        hud = app.query_one("#hud")
+        assert isinstance(hud, Static)
+        assert "hidden" in hud.classes
+
+
+async def test_hud_shows_streaming_below_during_stream_when_at_bottom():
+    bus = EventBus()
+    app = Console(event_bus=bus)
+    async with app.run_test() as pilot:
+        hud = app.query_one("#hud")
+        await bus.emit("stream_started")
+        assert "hidden" not in hud.classes
+        assert "streaming below" in str(hud.render())
+        assert "hud-streaming" in hud.classes
+
+
+async def test_hud_hides_after_stream_finished():
+    bus = EventBus()
+    app = Console(event_bus=bus)
+    async with app.run_test() as pilot:
+        hud = app.query_one("#hud")
+        await bus.emit("stream_started")
+        assert "hidden" not in hud.classes
+        await bus.emit("stream_finished")
+        assert "hidden" in hud.classes
+        assert "hud-streaming" not in hud.classes
+
+
+async def test_hud_shows_offset_when_scrolled_up_during_stream():
+    bus = EventBus()
+    app = Console(event_bus=bus)
+    async with app.run_test() as pilot:
+        hud = app.query_one("#hud")
+        rich_log = app.query_one(RichLog)
+        for i in range(100):
+            rich_log.write(f"Line {i}\n")
+        # scroll to top so we are not at bottom
+        rich_log.scroll_home(animate=False)
+        app._check_scroll()
+        await bus.emit("stream_started")
+        assert "hidden" not in hud.classes
+        assert "scroll to resume" in str(hud.render())
+        assert "hud-streaming" not in hud.classes
+
+
+async def test_hud_shift_g_binding_registered():
+    app = Console()
+    async with app.run_test() as pilot:
+        assert any(b.key == "shift+g" for b in app.BINDINGS)

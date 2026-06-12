@@ -55,7 +55,15 @@ class Console(App):
     #thinking {
         dock: bottom;
         height: 1;
-        color: $accent;
+        color: #00F0FF;
+        padding: 0 1;
+    }
+
+    #streaming-line {
+        dock: bottom;
+        height: auto;
+        min-height: 1;
+        color: #D0D0D0;
         padding: 0 1;
     }
 
@@ -90,6 +98,7 @@ class Console(App):
         self._event_bus = event_bus
         self._model = model or "mock"
         self._rich_log: Optional[RichLog] = None
+        self._streaming_line: Optional[Static] = None
         self._thinking: Optional[Static] = None
         self._hud: Optional[Static] = None
         self._spinner_timer: Optional[Timer] = None
@@ -97,6 +106,7 @@ class Console(App):
         self._pending_approvals: dict[str, dict[str, Any]] = {}
         self._is_streaming = False
         self._was_at_bottom = True
+        self._text_buf = ""
         self._error_active = False
         self._last_prompt = ""
         self._error_line_start = 0
@@ -107,12 +117,14 @@ class Console(App):
 
     def compose(self):
         yield RichLog(wrap=True)
+        yield Static(id="streaming-line", classes="hidden")
         yield Static(id="thinking", classes="hidden")
         yield Static(id="hud", classes="hidden")
         yield Input()
 
     def on_mount(self):
         self._rich_log = self.query_one(RichLog)
+        self._streaming_line = self.query_one("#streaming-line")
         self._thinking = self.query_one("#thinking")
         self._hud = self.query_one("#hud")
         self._write_boot_telemetry()
@@ -168,6 +180,7 @@ class Console(App):
 
     def _on_stream_started(self, data):
         self._is_streaming = True
+        self._text_buf = ""
         self._error_active = False
         self._start_spinner()
         self._update_hud()
@@ -175,9 +188,23 @@ class Console(App):
     def _on_token_received(self, token):
         if hasattr(token, 'text'):
             token = token.text
-        self._rich_log.write(token)
+        self._text_buf += token
+        while "\n" in self._text_buf:
+            newline_idx = self._text_buf.index("\n")
+            line = self._text_buf[:newline_idx + 1]
+            self._text_buf = self._text_buf[newline_idx + 1:]
+            self._rich_log.write(line.rstrip("\n"))
+        if self._text_buf:
+            self._streaming_line.remove_class("hidden")
+            self._streaming_line.update(self._text_buf)
+        else:
+            self._streaming_line.add_class("hidden")
 
     def _on_stream_finished(self, data):
+        self._streaming_line.add_class("hidden")
+        if self._text_buf:
+            self._rich_log.write(self._text_buf)
+            self._text_buf = ""
         self._is_streaming = False
         self._stop_spinner()
         self._hud.add_class("hidden")

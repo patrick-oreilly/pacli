@@ -32,6 +32,7 @@ class Console(App):
         padding: 2 2;
         border: none;
         background: #0A0A0F;
+        overflow-x: hidden;
         scrollbar-size-vertical: 1;
         scrollbar-size-horizontal: 0;
         scrollbar-background: #0A0A0F;
@@ -108,7 +109,7 @@ class Console(App):
         self._approval_line_start = 0
 
     def compose(self):
-        yield RichLog()
+        yield RichLog(wrap=True)
         yield Static(id="thinking", classes="hidden")
         yield Static(id="hud", classes="hidden")
         yield Input()
@@ -225,7 +226,6 @@ class Console(App):
             from pacli.console.syntax_theme import IcySyntaxStyle
 
             lexer = self._code_lang or "text"
-            self._rich_log.write(Text("─" * 40, style="dim #2A2A3A"))
             syntax = Syntax(
                 code,
                 lexer,
@@ -234,11 +234,8 @@ class Console(App):
                 word_wrap=True,
             )
             self._rich_log.write(syntax)
-            self._rich_log.write(Text("─" * 40, style="dim #2A2A3A"))
         except Exception:
-            self._rich_log.write(Text("─" * 40, style="dim #2A2A3A"))
             self._rich_log.write(code)
-            self._rich_log.write(Text("─" * 40, style="dim #2A2A3A"))
 
     def _on_stream_finished(self, data):
         if self._text_buf:
@@ -426,15 +423,11 @@ class Console(App):
 
         cwd = os.getcwd()
         branch = self._get_git_branch()
-        context = Text.assemble(
-            ("model: ", "#6A6A6A"),
-            (self._model, "#888888"),
-            (" · dir: ", "#6A6A6A"),
-            (cwd, "#888888"),
-            (" · branch: ", "#6A6A6A"),
-            (branch, "#888888"),
+        home = os.path.expanduser("~")
+        short_cwd = cwd.replace(home, "~", 1) if cwd.startswith(home) else cwd
+        self._rich_log.write(
+            Text(f"  model: {self._model}  ·  dir: {short_cwd}  ·  branch: {branch}", style="dim #888888")
         )
-        self._rich_log.write(context)
 
     @staticmethod
     def _get_git_branch() -> str:

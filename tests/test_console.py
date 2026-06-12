@@ -608,7 +608,7 @@ async def test_boot_telemetry_writes_context_line_with_model_dir_branch():
     app = Console(model="MockAdapter")
     async with app.run_test() as pilot:
         output = app.query_one(RichLog)
-        output_text = "\n".join(line.text for line in output.lines)
+        output_text = "".join(line.text for line in output.lines)
         assert "model: MockAdapter" in output_text
-        assert "· dir:" in output_text
-        assert "· branch:" in output_text
+        assert "·  dir:" in output_text
+        assert "branch:" in output_text

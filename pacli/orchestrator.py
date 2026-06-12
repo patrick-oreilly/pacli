@@ -74,43 +74,48 @@ class Orchestrator:
             return (error, True)
 
     async def process_prompt(self, prompt: str) -> None:
-        await self._event_bus.emit("stream_started")
         try:
-            messages: list[Message] = [Message(role="user", content=prompt)]
-            tool_schemas = self._tool_registry.tool_schemas
-            for _ in range(self._loop_max_iterations):
-                text_chunks: list[str] = []
-                tool_calls: list[ToolCall] = []
+            await self._event_bus.emit("stream_started")
+            try:
+                messages: list[Message] = [Message(role="user", content=prompt)]
+                tool_schemas = self._tool_registry.tool_schemas
+                for _ in range(self._loop_max_iterations):
+                    text_chunks: list[str] = []
+                    tool_calls: list[ToolCall] = []
 
-                async for event in self._provider.stream_completion(messages, tool_schemas):
-                    if isinstance(event, TextToken):
-                        await self._event_bus.emit("token_received", event)
-                        text_chunks.append(event.text)
-                    elif isinstance(event, ToolCall):
-                        tool_calls.append(event)
+                    async for event in self._provider.stream_completion(messages, tool_schemas):
+                        if isinstance(event, TextToken):
+                            await self._event_bus.emit("token_received", event)
+                            text_chunks.append(event.text)
+                        elif isinstance(event, ToolCall):
+                            tool_calls.append(event)
 
-                if not tool_calls:
+                    if not tool_calls:
+                        assistant_content = "".join(text_chunks) if text_chunks else None
+                        messages.append(Message(role="assistant", content=assistant_content))
+                        break
+
                     assistant_content = "".join(text_chunks) if text_chunks else None
-                    messages.append(Message(role="assistant", content=assistant_content))
-                    break
+                    messages.append(Message(role="assistant", content=assistant_content, tool_calls=tool_calls))
 
-                assistant_content = "".join(text_chunks) if text_chunks else None
-                messages.append(Message(role="assistant", content=assistant_content, tool_calls=tool_calls))
-
-                for tc in tool_calls:
-                    await self._event_bus.emit("tool_used", {"tool": tc.name, "args": tc.args, "id": tc.id})
-                    result, is_error = await self.execute_tool(tc.name, **tc.args)
-                    content = f"Error: {result}" if is_error else result
-                    messages.append(Message(role="tool", content=content, tool_call_id=tc.id))
-            else:
-                await self._event_bus.emit(
-                    "tool_result",
-                    {"tool": "_loop", "args": {}, "error": f"Exceeded max iterations ({self._loop_max_iterations})"},
-                )
-        except Exception as e:
-            await self._event_bus.emit("prompt_error", {"error": str(e)})
-        finally:
-            await self._event_bus.emit("stream_finished")
+                    for tc in tool_calls:
+                        await self._event_bus.emit("tool_used", {"tool": tc.name, "args": tc.args, "id": tc.id})
+                        result, is_error = await self.execute_tool(tc.name, **tc.args)
+                        content = f"Error: {result}" if is_error else result
+                        messages.append(Message(role="tool", content=content, tool_call_id=tc.id))
+                else:
+                    await self._event_bus.emit(
+                        "tool_result",
+                        {"tool": "_loop", "args": {}, "error": f"Exceeded max iterations ({self._loop_max_iterations})"},
+                    )
+            except Exception as e:
+                await self._event_bus.emit("prompt_error", {"error": str(e)})
+            finally:
+                await self._event_bus.emit("stream_finished")
+        except Exception:
+            import traceback
+            tb = traceback.format_exc()
+            await self._event_bus.emit("system_fault", {"traceback": tb})
 
     async def _on_slash_command(self, data: str) -> None:
         parts = data.split(" ", 1)

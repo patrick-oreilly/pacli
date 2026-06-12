@@ -397,3 +397,23 @@ async def test_process_prompt_stream_started_finished_span_entire_loop():
     assert events.count("stream_finished") == 1
     assert events[0] == "stream_started"
     assert events[-1] == "stream_finished"
+
+
+async def test_orchestrator_emits_system_fault_on_unexpected_exception():
+    class _StreamFinishedExplodingBus(EventBus):
+        async def emit(self, event_type, data=None, concurrent=False):
+            if event_type == "stream_finished":
+                raise RuntimeError("unexpected crash in stream_finished emit")
+            return await super().emit(event_type, data=data, concurrent=concurrent)
+
+    exploding_bus = _StreamFinishedExplodingBus()
+
+    faults = []
+    exploding_bus.on("system_fault", lambda d: faults.append(d))
+
+    orchestrator = Orchestrator(provider=MockAdapter(), event_bus=exploding_bus)
+    await orchestrator.process_prompt("hello")
+
+    assert len(faults) == 1
+    assert "RuntimeError" in faults[0]["traceback"]
+    assert "unexpected crash in stream_finished emit" in faults[0]["traceback"]

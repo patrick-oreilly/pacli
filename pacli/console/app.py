@@ -201,7 +201,7 @@ class Console(App):
             self._code_lang = lang
             self._in_code_block = True
             label = lang if lang else "code"
-            self._rich_log.write(f"[dim]▸ {label}[/dim]\n")
+            self._rich_log.write(Text(f"▸ {label}\n", style="dim #6A6A6A"))
             return
 
         stripped = line.strip()

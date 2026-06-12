@@ -59,14 +59,6 @@ class Console(App):
         padding: 0 1;
     }
 
-    #streaming-line {
-        dock: bottom;
-        height: auto;
-        min-height: 1;
-        color: #D0D0D0;
-        padding: 0 1;
-    }
-
     #hud {
         dock: bottom;
         height: 1;
@@ -98,7 +90,6 @@ class Console(App):
         self._event_bus = event_bus
         self._model = model or "mock"
         self._rich_log: Optional[RichLog] = None
-        self._streaming_line: Optional[Static] = None
         self._thinking: Optional[Static] = None
         self._hud: Optional[Static] = None
         self._spinner_timer: Optional[Timer] = None
@@ -107,6 +98,7 @@ class Console(App):
         self._is_streaming = False
         self._was_at_bottom = True
         self._text_buf = ""
+        self._stream_line_idx: int | None = None
         self._error_active = False
         self._last_prompt = ""
         self._error_line_start = 0
@@ -117,14 +109,12 @@ class Console(App):
 
     def compose(self):
         yield RichLog(wrap=True)
-        yield Static(id="streaming-line", classes="hidden")
         yield Static(id="thinking", classes="hidden")
         yield Static(id="hud", classes="hidden")
         yield Input()
 
     def on_mount(self):
         self._rich_log = self.query_one(RichLog)
-        self._streaming_line = self.query_one("#streaming-line")
         self._thinking = self.query_one("#thinking")
         self._hud = self.query_one("#hud")
         self._write_boot_telemetry()
@@ -181,6 +171,7 @@ class Console(App):
     def _on_stream_started(self, data):
         self._is_streaming = True
         self._text_buf = ""
+        self._stream_line_idx = None
         self._error_active = False
         self._start_spinner()
         self._update_hud()
@@ -191,20 +182,24 @@ class Console(App):
         self._text_buf += token
         while "\n" in self._text_buf:
             newline_idx = self._text_buf.index("\n")
-            line = self._text_buf[:newline_idx + 1]
+            line = self._text_buf[:newline_idx]
             self._text_buf = self._text_buf[newline_idx + 1:]
-            self._rich_log.write(line.rstrip("\n"))
+            if self._stream_line_idx is not None:
+                del self._rich_log.lines[self._stream_line_idx:]
+            self._rich_log.write(line)
+            self._stream_line_idx = None
         if self._text_buf:
-            self._streaming_line.remove_class("hidden")
-            self._streaming_line.update(self._text_buf)
-        else:
-            self._streaming_line.add_class("hidden")
+            if self._stream_line_idx is not None:
+                del self._rich_log.lines[self._stream_line_idx:]
+            self._stream_line_idx = len(self._rich_log.lines)
+            self._rich_log.write(self._text_buf)
 
     def _on_stream_finished(self, data):
-        self._streaming_line.add_class("hidden")
-        if self._text_buf:
+        if self._stream_line_idx is not None and self._text_buf:
+            del self._rich_log.lines[self._stream_line_idx:]
             self._rich_log.write(self._text_buf)
-            self._text_buf = ""
+        self._text_buf = ""
+        self._stream_line_idx = None
         self._is_streaming = False
         self._stop_spinner()
         self._hud.add_class("hidden")
@@ -434,3 +429,4 @@ class Console(App):
         else:
             self._rich_log.write("Hello from pacli!")
         event.input.value = ""
+        event.input.refresh()

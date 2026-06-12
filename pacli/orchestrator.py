@@ -17,7 +17,7 @@ class Orchestrator:
         event_bus: EventBus,
         tool_registry: ToolRegistry | None = None,
         policy: Policy | None = None,
-        provider_factory: dict[str, type] | None = None,
+        provider_factory: dict[str, tuple] | None = None,
         loop_max_iterations: int = 20,
     ) -> None:
         self._provider = provider
@@ -118,9 +118,10 @@ class Orchestrator:
         arg = parts[1].strip() if len(parts) > 1 else ""
 
         if cmd == "/provider" and arg:
-            adapter_cls = self._provider_factory.get(arg)
-            if adapter_cls:
-                self._provider = adapter_cls()
+            entry = self._provider_factory.get(arg)
+            if entry:
+                cls, *args = entry
+                self._provider = cls(*args)
                 self._active_provider_name = arg
                 message = f"·· runtime · provider switched to {arg}"
             else:

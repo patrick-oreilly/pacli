@@ -214,7 +214,7 @@ async def test_slash_command_provider_switches_and_displays_system_event():
     orchestrator = Orchestrator(
         provider=MockAdapter(),
         event_bus=bus,
-        provider_factory={"mock": MockAdapter, "ollama": MockAdapter},
+        provider_factory={"mock": (MockAdapter,), "ollama": (MockAdapter,)},
     )
     bus.on("slash_command", orchestrator._on_slash_command)
 
@@ -294,7 +294,7 @@ async def test_slash_command_unknown_provider_shows_error():
     orchestrator = Orchestrator(
         provider=MockAdapter(),
         event_bus=bus,
-        provider_factory={"mock": MockAdapter},
+        provider_factory={"mock": (MockAdapter,)},
     )
     bus.on("slash_command", orchestrator._on_slash_command)
 

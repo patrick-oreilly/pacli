@@ -1,4 +1,6 @@
 import asyncio
+import os
+import subprocess
 from pathlib import Path
 from typing import Any, Optional
 
@@ -8,6 +10,7 @@ from textual.app import App
 from textual.widgets import Input, RichLog, Static
 from textual.timer import Timer
 
+from pacli import __version__
 from pacli.events import EventBus
 
 BRAILLE_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
@@ -46,9 +49,11 @@ class Console(App):
     def __init__(
         self,
         event_bus: Optional[EventBus] = None,
+        model: Optional[str] = None,
     ) -> None:
         super().__init__()
         self._event_bus = event_bus
+        self._model = model or "unknown"
         self._rich_log: Optional[RichLog] = None
         self._thinking: Optional[Static] = None
         self._pending_approvals: dict[str, dict[str, Any]] = {}
@@ -65,6 +70,7 @@ class Console(App):
     def on_mount(self):
         self._rich_log = self.query_one(RichLog)
         self._thinking = self.query_one("#thinking")
+        self._write_boot_telemetry()
         if self._event_bus:
             self._event_bus.on("stream_started", self._on_stream_started)
             self._event_bus.on("token_received", self._on_token_received)
@@ -74,6 +80,31 @@ class Console(App):
             self._event_bus.on("prompt_error", self._on_prompt_error)
             self._event_bus.on("system_event", self._on_system_event)
             self._event_bus.on("prompt_submitted", self._on_prompt_submitted)
+
+    def _write_boot_telemetry(self) -> None:
+        if not self._rich_log:
+            return
+        self._rich_log.write(f"[#00F0FF]●[/#00F0FF] [white]pacli v{__version__}[/white]")
+
+        cwd = os.getcwd()
+        branch = self._get_git_branch()
+        self._rich_log.write(
+            f"[dim #888888]model: {self._model} · dir: {cwd} · branch: {branch}[/dim #888888]"
+        )
+
+    @staticmethod
+    def _get_git_branch() -> str:
+        try:
+            result = subprocess.run(
+                ["git", "branch", "--show-current"],
+                capture_output=True,
+                text=True,
+                timeout=5,
+            )
+            branch = result.stdout.strip()
+            return branch or "unknown"
+        except Exception:
+            return "unknown"
 
     def _write_ai_line(self, content: str, style: str | None = None) -> None:
         if not self._rich_log:

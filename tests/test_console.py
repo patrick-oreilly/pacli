@@ -224,3 +224,21 @@ async def test_user_prompt_has_blank_line_separator():
         output_text = "\n".join(str(line) for line in output.lines)
         assert "> first" in output_text
         assert "> second" in output_text
+
+
+async def test_boot_telemetry_writes_header_with_cyan_dot():
+    app = Console()
+    async with app.run_test() as pilot:
+        output = app.query_one(RichLog)
+        output_text = "\n".join(str(line) for line in output.lines)
+        assert "pacli v0.1.0" in output_text
+
+
+async def test_boot_telemetry_writes_context_line_with_model_dir_branch():
+    app = Console(model="MockAdapter")
+    async with app.run_test() as pilot:
+        output = app.query_one(RichLog)
+        output_text = "\n".join(str(line) for line in output.lines)
+        assert "model: MockAdapter" in output_text
+        assert "· dir:" in output_text
+        assert "· branch:" in output_text

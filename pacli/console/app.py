@@ -1,3 +1,5 @@
+import traceback
+from pathlib import Path
 from typing import Any, Optional
 
 from textual.app import App
@@ -91,6 +93,7 @@ class Console(App):
             self._event_bus.on("tool_result", self._on_tool_result)
             self._event_bus.on("approval_required", self._on_approval_required)
             self._event_bus.on("prompt_error", self._on_prompt_error)
+            self._event_bus.on("system_fault", self._on_system_fault)
 
     def _check_scroll(self):
         if not self._rich_log:
@@ -215,6 +218,20 @@ class Console(App):
 
     def _on_prompt_error(self, data):
         self._rich_log.write(f"[error] {data.get('error', 'Unknown error')}")
+
+    @staticmethod
+    def _crash_log_path() -> Path:
+        return Path.home() / ".config" / "pacli" / "crash.log"
+
+    def _on_system_fault(self, data):
+        tb = data.get("traceback", "")
+        crash_path = self._crash_log_path()
+        crash_path.parent.mkdir(parents=True, exist_ok=True)
+        crash_path.write_text(tb)
+        if self._rich_log:
+            self._rich_log.write(f"[dim]·· System fault. Session saved to {crash_path}[/dim]")
+        if input_widget := self.query_one(Input):
+            input_widget.value = ""
 
     def _on_approval_required(self, data: dict[str, Any]) -> None:
         tool = data.get("tool", "unknown")

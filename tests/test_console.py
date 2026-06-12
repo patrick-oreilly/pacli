@@ -1,3 +1,4 @@
+from pathlib import Path
 from textual.widgets import Input, RichLog, Static
 from pacli.adapters.mock import MockAdapter
 from pacli.console.app import Console
@@ -298,3 +299,53 @@ async def test_code_block_stream_resets_state():
         output = app.query_one(RichLog)
         rendered = "\n".join(str(line) for line in output.lines)
         assert "fresh text" in rendered
+
+
+async def test_system_fault_displays_dim_line(tmp_path: Path):
+    crash_log = tmp_path / "crash.log"
+    original = Console._crash_log_path
+    Console._crash_log_path = staticmethod(lambda: crash_log)
+    try:
+        bus = EventBus()
+        app = Console(event_bus=bus)
+        async with app.run_test() as pilot:
+            await bus.emit("system_fault", {"traceback": "Traceback (most recent call last):\n  ...\nRuntimeError: test crash"})
+            output = app.query_one(RichLog)
+            messages = [str(line) for line in output.lines]
+            assert any("System fault" in msg for msg in messages)
+            input_widget = app.query_one(Input)
+            assert input_widget.value == ""
+    finally:
+        Console._crash_log_path = original
+
+
+async def test_system_fault_writes_traceback_to_crash_log(tmp_path: Path):
+    crash_log = tmp_path / "crash.log"
+    original = Console._crash_log_path
+    Console._crash_log_path = staticmethod(lambda: crash_log)
+    try:
+        bus = EventBus()
+        app = Console(event_bus=bus)
+        async with app.run_test() as pilot:
+            await bus.emit("system_fault", {"traceback": "RuntimeError: boom"})
+        assert crash_log.exists()
+        assert "RuntimeError: boom" in crash_log.read_text()
+    finally:
+        Console._crash_log_path = original
+
+
+async def test_system_fault_clears_input_box(tmp_path: Path):
+    crash_log = tmp_path / "crash.log"
+    original = Console._crash_log_path
+    Console._crash_log_path = staticmethod(lambda: crash_log)
+    try:
+        bus = EventBus()
+        app = Console(event_bus=bus)
+        async with app.run_test() as pilot:
+            input_widget = app.query_one(Input)
+            input_widget.focus()
+            input_widget.value = "some pending text"
+            await bus.emit("system_fault", {"traceback": "crash"})
+            assert input_widget.value == ""
+    finally:
+        Console._crash_log_path = original

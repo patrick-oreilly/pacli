@@ -159,3 +159,26 @@ async def test_orchestrator_skips_execution_when_approval_denied():
     assert results[0]["tool"] == "execute_shell"
     assert "denied" in results[0]["error"].lower()
     orchestrator.cleanup()
+
+
+async def test_orchestrator_emits_system_fault_on_unexpected_exception():
+    class _StreamFinishedExplodingBus(EventBus):
+        async def emit(self, event_type, data=None, concurrent=False):
+            if event_type == "stream_finished":
+                raise RuntimeError("unexpected crash in stream_finished emit")
+            return await super().emit(event_type, data=data, concurrent=concurrent)
+
+    exploding_bus = _StreamFinishedExplodingBus()
+    exploding_bus.on("prompt_submitted", lambda d: None)
+    exploding_bus.on("stream_started", lambda d: None)
+    exploding_bus.on("token_received", lambda d: None)
+
+    faults = []
+    exploding_bus.on("system_fault", lambda d: faults.append(d))
+
+    orchestrator = Orchestrator(provider=MockAdapter(), event_bus=exploding_bus)
+    await orchestrator.process_prompt("hello")
+
+    assert len(faults) == 1
+    assert "RuntimeError" in faults[0]["traceback"]
+    assert "unexpected crash in stream_finished emit" in faults[0]["traceback"]

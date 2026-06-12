@@ -244,7 +244,7 @@ async def test_multiple_code_blocks_in_stream():
         rendered = "\n".join(str(line) for line in output.lines)
         assert "text between" in rendered
         assert "```" not in rendered
-        assert "◇ python" in rendered
+        assert "▸ python" in rendered
 
 
 async def test_code_block_unclosed_flushed_on_stream_finished():

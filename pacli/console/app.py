@@ -11,12 +11,14 @@ class Console(App):
     CSS = """
     Screen {
         layout: vertical;
+        background: #0A0A0F;
     }
 
     RichLog {
         height: 1fr;
         padding: 1;
         border: none;
+        background: #0A0A0F;
     }
 
     Input {
@@ -157,7 +159,7 @@ class Console(App):
             self._code_lang = lang
             self._in_code_block = True
             label = lang if lang else "code"
-            self._rich_log.write(f"[dim]◇ {label}[/dim]\n")
+            self._rich_log.write(f"[dim]▸ {label}[/dim]\n")
             return
 
         stripped = line.strip()

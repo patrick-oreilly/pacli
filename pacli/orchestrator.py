@@ -21,6 +21,7 @@ class Orchestrator:
         loop_max_iterations: int = 20,
         system_prompt: str | None = None,
         provider_name: str = "mock",
+        model_name: str = "mock",
         tools_enabled: bool = False,
     ) -> None:
         self._provider = provider
@@ -29,7 +30,7 @@ class Orchestrator:
         self._policy = policy or Policy()
         self._provider_factory = provider_factory or {}
         self._active_provider_name = provider_name
-        self._active_model_name = "mock"
+        self._active_model_name = model_name
         self._system_prompt = system_prompt
         self._tools_enabled = tools_enabled
         self._loop_max_iterations = loop_max_iterations
@@ -141,24 +142,34 @@ class Orchestrator:
         cmd = parts[0].lower()
         arg = parts[1].strip() if len(parts) > 1 else ""
 
-        if cmd == "/provider" and arg:
-            entry = self._provider_factory.get(arg)
-            if entry:
-                cls, *args = entry
-                self._provider = cls(*args)
-                self._active_provider_name = arg
-                message = f"·· runtime · provider switched to {arg}"
-            else:
+        if cmd == "/provider":
+            if not arg:
                 available = list(self._provider_factory.keys()) if self._provider_factory else ["mock"]
-                message = f"·· runtime · unknown provider: {arg} (available: {', '.join(available)})"
-        elif cmd == "/model" and arg:
-            self._active_model_name = arg
-            if hasattr(self._provider, "_model"):
-                self._provider._model = arg
-            message = f"·· runtime · model switched to {arg}"
-        elif cmd == "/tools" and arg in ("on", "off"):
-            self._tools_enabled = arg == "on"
-            message = f"·· runtime · tools {'enabled' if self._tools_enabled else 'disabled'}"
+                message = f"·· runtime · usage: /provider <name> (available: {', '.join(available)})"
+            else:
+                entry = self._provider_factory.get(arg)
+                if entry:
+                    cls, *args = entry
+                    self._provider = cls(*args)
+                    self._active_provider_name = arg
+                    message = f"·· runtime · provider switched to {arg}"
+                else:
+                    available = list(self._provider_factory.keys()) if self._provider_factory else ["mock"]
+                    message = f"·· runtime · unknown provider: {arg} (available: {', '.join(available)})"
+        elif cmd == "/model":
+            if not arg:
+                message = f"·· runtime · current model: {self._active_model_name} (usage: /model <name>)"
+            else:
+                self._active_model_name = arg
+                if hasattr(self._provider, "_model"):
+                    self._provider._model = arg
+                message = f"·· runtime · model switched to {arg}"
+        elif cmd == "/tools":
+            if arg not in ("on", "off"):
+                message = "·· runtime · usage: /tools on|off"
+            else:
+                self._tools_enabled = arg == "on"
+                message = f"·· runtime · tools {'enabled' if self._tools_enabled else 'disabled'}"
         elif cmd == "/help":
             message = "·· runtime · available commands: /model <name>, /provider <name>, /tools on|off, /help"
         else:

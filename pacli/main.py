@@ -44,6 +44,7 @@ def main():
         loop_max_iterations=cfg.loop_max_iterations,
         system_prompt=cfg.load_system_prompt(),
         provider_name=cfg.provider,
+        model_name=cfg.model,
         tools_enabled=cfg.tools_enabled,
     )
 

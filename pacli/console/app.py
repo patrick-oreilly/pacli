@@ -74,6 +74,9 @@ class Console(App):
         self._code_lang = ""
         self._code_lines: list[str] = []
         self._text_buf = ""
+        self._error_active = False
+        self._last_prompt = ""
+        self._error_line_start = 0
 
     def compose(self):
         yield Static(id="thinking", classes="hidden")
@@ -139,6 +142,7 @@ class Console(App):
         self._in_code_block = False
         self._code_lang = ""
         self._code_lines = []
+        self._error_active = False
         self._thinking.remove_class("hidden")
         self._update_hud()
 
@@ -217,7 +221,23 @@ class Console(App):
             self._rich_log.write(f"[tool] {data['result']}")
 
     def _on_prompt_error(self, data):
-        self._rich_log.write(f"[error] {data.get('error', 'Unknown error')}")
+        self._error_active = True
+        self._error_line_start = len(self._rich_log.lines)
+        msg = data.get('error', 'Unknown error')
+        self._rich_log.write(
+            f"[#FF6B6B]■ Connection Failed: {msg}. Press [Enter] to retry.[/#FF6B6B]"
+        )
+
+    def _vanish_error(self) -> None:
+        if not self._error_active:
+            return
+        all_lines = list(self._rich_log.lines)
+        kept = all_lines[:self._error_line_start]
+        self._rich_log.clear()
+        for line in kept:
+            if line.cell_length > 0:
+                self._rich_log.write(line.text + "\n")
+        self._error_active = False
 
     @staticmethod
     def _crash_log_path() -> Path:
@@ -254,7 +274,15 @@ class Console(App):
                     )
             else:
                 self._rich_log.write("! Answer y/n to approve or deny the pending request")
+        elif self._error_active:
+            self._vanish_error()
+            new_prompt = event.value.strip()
+            if new_prompt:
+                self._last_prompt = new_prompt
+            if self._event_bus and self._last_prompt:
+                await self._event_bus.emit("prompt_submitted", self._last_prompt)
         elif self._event_bus:
+            self._last_prompt = event.value
             await self._event_bus.emit("prompt_submitted", event.value)
         else:
             self._rich_log.write("Hello from pacli!")

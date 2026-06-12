@@ -11,6 +11,7 @@ from textual.timer import Timer
 from pacli.events import EventBus
 
 BRAILLE_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
+BORDER = "\u2590"
 
 
 class Console(App):
@@ -53,6 +54,8 @@ class Console(App):
         self._pending_approvals: dict[str, dict[str, Any]] = {}
         self._spinner_timer: Optional[Timer] = None
         self._spinner_frame = 0
+        self._in_ai_turn = False
+        self._ai_buffer = ""
 
     def compose(self):
         yield RichLog()
@@ -71,13 +74,44 @@ class Console(App):
             self._event_bus.on("prompt_error", self._on_prompt_error)
             self._event_bus.on("system_event", self._on_system_event)
 
+    def _write_ai_line(self, content: str, style: str | None = None) -> None:
+        if not self._rich_log:
+            return
+        line = Text.assemble(
+            (f"{BORDER} ", "#00F0FF"),
+            (content, style or "white"),
+        )
+        self._rich_log.write(line)
+
+    def _flush_ai_buffer(self) -> None:
+        if self._ai_buffer:
+            for line_text in self._ai_buffer.split("\n"):
+                self._write_ai_line(line_text)
+            self._ai_buffer = ""
+
     def _on_stream_started(self, data):
         self._stop_spinner()
+        self._in_ai_turn = True
 
     def _on_token_received(self, token):
-        self._rich_log.write(token)
+        if not self._in_ai_turn:
+            self._rich_log.write(token)
+            return
+        if "\n" in token:
+            self._flush_ai_buffer()
+            parts = token.split("\n")
+            for part in parts[:-1]:
+                if self._ai_buffer:
+                    self._write_ai_line(self._ai_buffer + part)
+                    self._ai_buffer = ""
+                else:
+                    self._write_ai_line(part)
+            self._ai_buffer = parts[-1]
+        else:
+            self._ai_buffer += token
 
     def _on_stream_finished(self, data):
+        self._flush_ai_buffer()
         self._start_spinner()
 
     def _on_tool_result(self, data):
@@ -91,13 +125,22 @@ class Console(App):
             is_denied = error == "Approval denied by user"
             if is_denied:
                 line = f"  {call_line} → [denied]"
-                self._rich_log.write(Text(line, style="dim #888888"))
+                if self._in_ai_turn:
+                    self._write_ai_line(line, "dim #888888")
+                else:
+                    self._rich_log.write(Text(line, style="dim #888888"))
             else:
                 line = f"  {call_line} → [exit 1]"
-                self._rich_log.write(Text(line, style="bold #FF8C00"))
+                if self._in_ai_turn:
+                    self._write_ai_line(line, "bold #FF8C00")
+                else:
+                    self._rich_log.write(Text(line, style="bold #FF8C00"))
         else:
             line = f"  {call_line} → [exit 0]"
-            self._rich_log.write(Text(line, style="dim #888888"))
+            if self._in_ai_turn:
+                self._write_ai_line(line, "dim #888888")
+            else:
+                self._rich_log.write(Text(line, style="dim #888888"))
 
     def _on_system_event(self, data: dict[str, Any]) -> None:
         message = data.get("message", "")
@@ -154,7 +197,15 @@ class Console(App):
             else:
                 self._rich_log.write("! Answer y/n to approve or deny the pending request")
         elif self._event_bus:
+            self._write_user_prompt(event.value)
             await self._event_bus.emit("prompt_submitted", event.value)
         else:
             self._rich_log.write("Hello from pacli!")
         event.input.value = ""
+
+    def _write_user_prompt(self, text: str) -> None:
+        self._flush_ai_buffer()
+        self._in_ai_turn = True
+        self._rich_log.write("")
+        prompt_text = Text(f"> {text}", style="#D0D0D0")
+        self._rich_log.write(prompt_text)

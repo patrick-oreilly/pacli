@@ -51,16 +51,19 @@ class Orchestrator:
                 approved = False
             if not approved:
                 await self._event_bus.emit(
-                    "tool_result", {"tool": tool_name, "error": "Approval denied by user"}
+                    "tool_result", {"tool": tool_name, "args": kwargs, "error": "Approval denied by user"}
                 )
                 return
         try:
             result = await self._tool_registry.execute_tool(tool_name, **kwargs)
-            await self._event_bus.emit("tool_result", {"tool": tool_name, "result": result})
+            await self._event_bus.emit("tool_result", {"tool": tool_name, "args": kwargs, "result": result})
         except Exception as e:
-            await self._event_bus.emit("tool_result", {"tool": tool_name, "error": str(e)})
+            await self._event_bus.emit("tool_result", {"tool": tool_name, "args": kwargs, "error": str(e)})
 
     async def process_prompt(self, prompt: str) -> None:
+        if prompt.startswith("/"):
+            await self._handle_slash_command(prompt)
+            return
         await self._event_bus.emit("stream_started")
         try:
             async for token in self._provider.stream_completion(prompt):
@@ -69,3 +72,15 @@ class Orchestrator:
             await self._event_bus.emit("prompt_error", {"error": str(e)})
         finally:
             await self._event_bus.emit("stream_finished")
+
+    async def _handle_slash_command(self, prompt: str) -> None:
+        parts = prompt.split(" ", 1)
+        cmd = parts[0]
+        arg = parts[1].strip() if len(parts) > 1 else ""
+        if cmd == "/model" and arg:
+            message = f"·· runtime · model switched to {arg}"
+        elif cmd == "/help":
+            message = "·· runtime · available commands: /model <name>, /help"
+        else:
+            message = f"·· runtime · unknown command: {cmd}"
+        await self._event_bus.emit("system_event", {"message": message})

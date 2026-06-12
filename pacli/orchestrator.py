@@ -157,8 +157,17 @@ class Orchestrator:
                     available = list(self._provider_factory.keys()) if self._provider_factory else ["mock"]
                     message = f"·· runtime · unknown provider: {arg} (available: {', '.join(available)})"
         elif cmd == "/model":
-            if not arg:
-                message = f"·· runtime · current model: {self._active_model_name} (usage: /model <name>)"
+            if arg in ("list", "ls"):
+                if hasattr(self._provider, "list_models"):
+                    try:
+                        models = await self._provider.list_models()
+                        message = f"·· runtime · available models: {', '.join(models)}"
+                    except Exception:
+                        message = "·· runtime · could not fetch model list"
+                else:
+                    message = "·· runtime · model listing not supported by current provider"
+            elif not arg:
+                message = f"·· runtime · current model: {self._active_model_name} (usage: /model <name>, /model list)"
             else:
                 self._active_model_name = arg
                 if hasattr(self._provider, "_model"):
@@ -171,7 +180,7 @@ class Orchestrator:
                 self._tools_enabled = arg == "on"
                 message = f"·· runtime · tools {'enabled' if self._tools_enabled else 'disabled'}"
         elif cmd == "/help":
-            message = "·· runtime · available commands: /model <name>, /provider <name>, /tools on|off, /help"
+            message = "·· runtime · available commands: /model <name|list>, /provider <name>, /tools on|off, /help"
         else:
             message = f"·· runtime · unknown command: {cmd}"
 

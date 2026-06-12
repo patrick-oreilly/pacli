@@ -106,3 +106,7 @@ class OllamaAdapter:
                         args=args,
                     )
                 tool_call_buffers.clear()
+
+    async def list_models(self) -> list[str]:
+        models = await self._client.models.list()
+        return [m.id for m in models]

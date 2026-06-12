@@ -4,7 +4,7 @@ from pacli.adapters.mock import MockAdapter
 from pacli.adapters.ollama import OllamaAdapter
 from pacli.config import load_config
 from pacli.console.app import Console
-from pacli.events import EventBus
+from pacli.events import EventBus, EventType
 from pacli.local_sandbox import LocalSandbox
 from pacli.orchestrator import Orchestrator
 from pacli.policy import Policy
@@ -42,9 +42,11 @@ def main():
             "ollama": (OllamaAdapter, cfg.base_url, cfg.model),
         },
         loop_max_iterations=cfg.loop_max_iterations,
+        system_prompt=cfg.load_system_prompt(),
+        provider_name=cfg.provider,
     )
 
-    bus.on("prompt_submitted", orchestrator.process_prompt)
+    bus.on(EventType.PROMPT_SUBMITTED, orchestrator.process_prompt)
 
     app = Console(event_bus=bus, model=cfg.model)
     app.run()

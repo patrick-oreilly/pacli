@@ -2,7 +2,7 @@ import asyncio
 from uuid import uuid4
 from typing import Any
 
-from pacli.events import EventBus
+from pacli.events import EventBus, EventType
 from pacli.policy import Policy
 from pacli.provider import Message, Provider, TextToken, ToolCall
 from pacli.tool_registry import ToolRegistry
@@ -19,24 +19,28 @@ class Orchestrator:
         policy: Policy | None = None,
         provider_factory: dict[str, tuple] | None = None,
         loop_max_iterations: int = 20,
+        system_prompt: str | None = None,
+        provider_name: str = "mock",
     ) -> None:
         self._provider = provider
         self._event_bus = event_bus
         self._tool_registry = tool_registry or ToolRegistry()
         self._policy = policy or Policy()
         self._provider_factory = provider_factory or {}
-        self._active_provider_name = "mock"
+        self._active_provider_name = provider_name
         self._active_model_name = "mock"
+        self._system_prompt = system_prompt
         self._loop_max_iterations = loop_max_iterations
         self._pending_approvals: dict[str, asyncio.Future[bool]] = {}
         self._approval_handler = self._on_approval_response
         self._slash_handler = self._on_slash_command
-        self._event_bus.on("approval_response", self._approval_handler)
-        self._event_bus.on("slash_command", self._slash_handler)
+        self._process_lock = asyncio.Lock()
+        self._event_bus.on(EventType.APPROVAL_RESPONSE, self._approval_handler)
+        self._event_bus.on(EventType.SLASH_COMMAND, self._slash_handler)
 
     def cleanup(self) -> None:
-        self._event_bus.off("approval_response", self._approval_handler)
-        self._event_bus.off("slash_command", self._slash_handler)
+        self._event_bus.off(EventType.APPROVAL_RESPONSE, self._approval_handler)
+        self._event_bus.off(EventType.SLASH_COMMAND, self._slash_handler)
 
     def _on_approval_response(self, data: Any) -> None:
         approval_id = data.get("id")
@@ -53,7 +57,7 @@ class Orchestrator:
             approval_data.update(
                 (k, v) for k, v in kwargs.items() if k not in ("id", "tool")
             )
-            await self._event_bus.emit("approval_required", approval_data)
+            await self._event_bus.emit(EventType.APPROVAL_REQUIRED, approval_data)
             try:
                 approved = await asyncio.wait_for(future, timeout=APPROVAL_TIMEOUT)
             except asyncio.TimeoutError:
@@ -61,23 +65,36 @@ class Orchestrator:
             if not approved:
                 error = "Approval denied by user"
                 await self._event_bus.emit(
-                    "tool_result", {"tool": tool_name, "args": kwargs, "error": error}
+                    EventType.TOOL_RESULT, {"tool": tool_name, "args": kwargs, "error": error}
                 )
                 return (error, True)
         try:
             result = await self._tool_registry.execute_tool(tool_name, **kwargs)
-            await self._event_bus.emit("tool_result", {"tool": tool_name, "args": kwargs, "result": result})
+            await self._event_bus.emit(EventType.TOOL_RESULT, {"tool": tool_name, "args": kwargs, "result": result})
             return (result, False)
         except Exception as e:
             error = str(e)
-            await self._event_bus.emit("tool_result", {"tool": tool_name, "args": kwargs, "error": error})
+            await self._event_bus.emit(EventType.TOOL_RESULT, {"tool": tool_name, "args": kwargs, "error": error})
             return (error, True)
 
     async def process_prompt(self, prompt: str) -> None:
+        if self._process_lock.locked():
+            await self._event_bus.emit(
+                EventType.SYSTEM_EVENT,
+                {"message": "·· runtime · already processing a prompt, please wait"},
+            )
+            return
+        async with self._process_lock:
+            await self._do_process_prompt(prompt)
+
+    async def _do_process_prompt(self, prompt: str) -> None:
         try:
-            await self._event_bus.emit("stream_started")
+            await self._event_bus.emit(EventType.STREAM_STARTED)
             try:
-                messages: list[Message] = [Message(role="user", content=prompt)]
+                messages: list[Message] = []
+                if self._system_prompt:
+                    messages.append(Message(role="system", content=self._system_prompt))
+                messages.append(Message(role="user", content=prompt))
                 tool_schemas = self._tool_registry.tool_schemas
                 for _ in range(self._loop_max_iterations):
                     text_chunks: list[str] = []
@@ -85,7 +102,7 @@ class Orchestrator:
 
                     async for event in self._provider.stream_completion(messages, tool_schemas):
                         if isinstance(event, TextToken):
-                            await self._event_bus.emit("token_received", event)
+                            await self._event_bus.emit(EventType.TOKEN_RECEIVED, event)
                             text_chunks.append(event.text)
                         elif isinstance(event, ToolCall):
                             tool_calls.append(event)
@@ -99,23 +116,23 @@ class Orchestrator:
                     messages.append(Message(role="assistant", content=assistant_content, tool_calls=tool_calls))
 
                     for tc in tool_calls:
-                        await self._event_bus.emit("tool_used", {"tool": tc.name, "args": tc.args, "id": tc.id})
+                        await self._event_bus.emit(EventType.TOOL_USED, {"tool": tc.name, "args": tc.args, "id": tc.id})
                         result, is_error = await self.execute_tool(tc.name, **tc.args)
                         content = f"Error: {result}" if is_error else result
                         messages.append(Message(role="tool", content=content, tool_call_id=tc.id))
                 else:
                     await self._event_bus.emit(
-                        "tool_result",
+                        EventType.TOOL_RESULT,
                         {"tool": "_loop", "args": {}, "error": f"Exceeded max iterations ({self._loop_max_iterations})"},
                     )
             except Exception as e:
-                await self._event_bus.emit("prompt_error", {"error": str(e)})
+                await self._event_bus.emit(EventType.PROMPT_ERROR, {"error": str(e)})
             finally:
-                await self._event_bus.emit("stream_finished")
+                await self._event_bus.emit(EventType.STREAM_FINISHED)
         except Exception:
             import traceback
             tb = traceback.format_exc()
-            await self._event_bus.emit("system_fault", {"traceback": tb})
+            await self._event_bus.emit(EventType.SYSTEM_FAULT, {"traceback": tb})
 
     async def _on_slash_command(self, data: str) -> None:
         parts = data.split(" ", 1)
@@ -134,10 +151,12 @@ class Orchestrator:
                 message = f"·· runtime · unknown provider: {arg} (available: {', '.join(available)})"
         elif cmd == "/model" and arg:
             self._active_model_name = arg
+            if hasattr(self._provider, "_model"):
+                self._provider._model = arg
             message = f"·· runtime · model switched to {arg}"
         elif cmd == "/help":
             message = "·· runtime · available commands: /model <name>, /provider <name>, /help"
         else:
             message = f"·· runtime · unknown command: {cmd}"
 
-        await self._event_bus.emit("system_event", {"message": message})
+        await self._event_bus.emit(EventType.SYSTEM_EVENT, {"message": message})

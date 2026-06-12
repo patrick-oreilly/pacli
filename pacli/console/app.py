@@ -11,7 +11,7 @@ from textual.widgets import Input, RichLog, Static
 from textual.timer import Timer
 
 from pacli import __version__
-from pacli.events import EventBus
+from pacli.events import EventBus, EventType
 
 BRAILLE_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
 
@@ -29,13 +29,13 @@ class Console(App):
 
     RichLog {
         height: 1fr;
-        padding: 2 2;
+        padding: 0 1;
         border: none;
-        background: #0A0A0F;
+        background: transparent;
         overflow-x: hidden;
         scrollbar-size-vertical: 1;
         scrollbar-size-horizontal: 0;
-        scrollbar-background: #0A0A0F;
+        scrollbar-background: transparent;
         scrollbar-color: #2A2A2A;
         scrollbar-color-hover: #5A5A5A;
         scrollbar-color-active: #888888;
@@ -50,6 +50,14 @@ class Console(App):
 
     Input > .input--cursor {
         background: $accent;
+    }
+
+    #streaming-line {
+        dock: bottom;
+        height: auto;
+        min-height: 1;
+        color: #D0D0D0;
+        padding: 0 1;
     }
 
     #thinking {
@@ -90,6 +98,7 @@ class Console(App):
         self._event_bus = event_bus
         self._model = model or "mock"
         self._rich_log: Optional[RichLog] = None
+        self._streaming_line: Optional[Static] = None
         self._thinking: Optional[Static] = None
         self._hud: Optional[Static] = None
         self._spinner_timer: Optional[Timer] = None
@@ -107,30 +116,33 @@ class Console(App):
         self._approval_pending = False
         self._approval_data: dict[str, Any] = {}
         self._approval_line_start = 0
+        self._approval_restore_focus: Optional[Any] = None
 
     def compose(self):
         yield RichLog(wrap=True)
+        yield Static(id="streaming-line", classes="hidden")
         yield Static(id="thinking", classes="hidden")
         yield Static(id="hud", classes="hidden")
         yield Input()
 
     def on_mount(self):
         self._rich_log = self.query_one(RichLog)
+        self._streaming_line = self.query_one("#streaming-line")
         self._thinking = self.query_one("#thinking")
         self._hud = self.query_one("#hud")
         self._write_boot_telemetry()
         self.set_interval(0.2, self._check_scroll)
         if self._event_bus:
-            self._event_bus.on("stream_started", self._on_stream_started)
-            self._event_bus.on("token_received", self._on_token_received)
-            self._event_bus.on("stream_finished", self._on_stream_finished)
-            self._event_bus.on("tool_used", self._on_tool_used)
-            self._event_bus.on("tool_result", self._on_tool_result)
-            self._event_bus.on("approval_required", self._on_approval_required)
-            self._event_bus.on("prompt_error", self._on_prompt_error)
-            self._event_bus.on("system_event", self._on_system_event)
-            self._event_bus.on("system_fault", self._on_system_fault)
-            self._event_bus.on("prompt_submitted", self._on_prompt_submitted)
+            self._event_bus.on(EventType.STREAM_STARTED, self._on_stream_started)
+            self._event_bus.on(EventType.TOKEN_RECEIVED, self._on_token_received)
+            self._event_bus.on(EventType.STREAM_FINISHED, self._on_stream_finished)
+            self._event_bus.on(EventType.TOOL_USED, self._on_tool_used)
+            self._event_bus.on(EventType.TOOL_RESULT, self._on_tool_result)
+            self._event_bus.on(EventType.APPROVAL_REQUIRED, self._on_approval_required)
+            self._event_bus.on(EventType.PROMPT_ERROR, self._on_prompt_error)
+            self._event_bus.on(EventType.SYSTEM_EVENT, self._on_system_event)
+            self._event_bus.on(EventType.SYSTEM_FAULT, self._on_system_fault)
+            self._event_bus.on(EventType.PROMPT_SUBMITTED, self._on_prompt_submitted)
 
     def _check_scroll(self):
         if not self._rich_log:
@@ -177,6 +189,7 @@ class Console(App):
         self._code_lang = ""
         self._code_lines = []
         self._error_active = False
+        self._streaming_line.add_class("hidden")
         self._start_spinner()
         self._update_hud()
 
@@ -190,8 +203,14 @@ class Console(App):
             remainder = self._text_buf[newline_idx + 1:]
             self._text_buf = remainder
             self._process_line(line + "\n")
+        if self._text_buf:
+            self._streaming_line.remove_class("hidden")
+            self._streaming_line.update(self._text_buf)
+        else:
+            self._streaming_line.add_class("hidden")
 
     def _process_line(self, line: str) -> None:
+        self._streaming_line.add_class("hidden")
         if not self._in_code_block:
             stripped = line.lstrip()
             if not stripped.startswith("```"):
@@ -238,6 +257,7 @@ class Console(App):
             self._rich_log.write(code)
 
     def _on_stream_finished(self, data):
+        self._streaming_line.add_class("hidden")
         if self._text_buf:
             self._rich_log.write(self._text_buf)
             self._text_buf = ""
@@ -354,6 +374,13 @@ class Console(App):
         self._rich_log.write(
             Text("    [y] approve  [n] deny", style="dim #6A6A6A")
         )
+        mouse_over = self.mouse_over
+        focused = self.focused
+        if focused is not None:
+            self.set_focus(None)
+            self._approval_restore_focus = focused
+        else:
+            self._approval_restore_focus = None
         self._bindings.bind("y", "approval_yes", "Approve", priority=True)
         self._bindings.bind("n", "approval_no", "Deny", priority=True)
 
@@ -380,7 +407,7 @@ class Console(App):
         if self._event_bus:
             asyncio.get_running_loop().create_task(
                 self._event_bus.emit(
-                    "approval_response",
+                    EventType.APPROVAL_RESPONSE,
                     {"id": approval_id, "approved": approved},
                 )
             )
@@ -388,6 +415,9 @@ class Console(App):
         self._bindings.key_to_bindings.pop("n", None)
         self._approval_pending = False
         self._approval_data = {}
+        if self._approval_restore_focus is not None:
+            self.set_focus(self._approval_restore_focus)
+            self._approval_restore_focus = None
 
     def _start_spinner(self) -> None:
         if not self._thinking or self._spinner_timer is not None:
@@ -456,13 +486,13 @@ class Console(App):
             if new_prompt:
                 self._last_prompt = new_prompt
             if self._event_bus and self._last_prompt:
-                await self._event_bus.emit("prompt_submitted", self._last_prompt)
+                await self._event_bus.emit(EventType.PROMPT_SUBMITTED, self._last_prompt)
         elif self._event_bus:
             if event.value.startswith("/"):
-                await self._event_bus.emit("slash_command", event.value)
+                await self._event_bus.emit(EventType.SLASH_COMMAND, event.value)
             else:
                 self._last_prompt = event.value
-                await self._event_bus.emit("prompt_submitted", event.value)
+                await self._event_bus.emit(EventType.PROMPT_SUBMITTED, event.value)
         else:
             self._rich_log.write("Hello from pacli!")
         event.input.value = ""

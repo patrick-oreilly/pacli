@@ -417,3 +417,87 @@ async def test_orchestrator_emits_system_fault_on_unexpected_exception():
     assert len(faults) == 1
     assert "RuntimeError" in faults[0]["traceback"]
     assert "unexpected crash in stream_finished emit" in faults[0]["traceback"]
+
+
+async def test_system_prompt_is_prepended_to_messages():
+    bus = EventBus()
+
+    captured_messages: list[list[Message]] = []
+
+    class StubProvider:
+        async def stream_completion(self, messages, tool_schemas=None):
+            captured_messages.append(messages)
+            yield TextToken(text="ok")
+
+    orchestrator = Orchestrator(
+        provider=StubProvider(),
+        event_bus=bus,
+        system_prompt="You are a helpful assistant.",
+    )
+    await orchestrator.process_prompt("hello")
+
+    assert len(captured_messages) == 1
+    msgs = captured_messages[0]
+    assert msgs[0].role == "system"
+    assert msgs[0].content == "You are a helpful assistant."
+    assert msgs[1].role == "user"
+    assert msgs[1].content == "hello"
+    orchestrator.cleanup()
+
+
+async def test_no_system_prompt_when_none():
+    bus = EventBus()
+
+    captured_messages: list[list[Message]] = []
+
+    class StubProvider:
+        async def stream_completion(self, messages, tool_schemas=None):
+            captured_messages.append(messages)
+            yield TextToken(text="ok")
+
+    orchestrator = Orchestrator(
+        provider=StubProvider(),
+        event_bus=bus,
+    )
+    await orchestrator.process_prompt("hello")
+
+    assert len(captured_messages) == 1
+    msgs = captured_messages[0]
+    assert msgs[0].role == "user"
+    assert msgs[0].content == "hello"
+    orchestrator.cleanup()
+
+
+async def test_model_slash_command_updates_provider_model():
+    bus = EventBus()
+    system_events = []
+    bus.on("system_event", lambda d: system_events.append(d))
+
+    class StubProviderWithModel:
+        _model = "old-model"
+
+        async def stream_completion(self, messages, tool_schemas=None):
+            yield TextToken(text="ok")
+
+    provider = StubProviderWithModel()
+    orchestrator = Orchestrator(
+        provider=provider,
+        event_bus=bus,
+    )
+    await orchestrator._on_slash_command("/model new-model")
+
+    assert provider._model == "new-model"
+    assert "model switched to new-model" in system_events[0]["message"]
+    orchestrator.cleanup()
+
+
+async def test_provider_name_init():
+    bus = EventBus()
+
+    orchestrator = Orchestrator(
+        provider=MockAdapter(),
+        event_bus=bus,
+        provider_name="ollama",
+    )
+    assert orchestrator._active_provider_name == "ollama"
+    orchestrator.cleanup()

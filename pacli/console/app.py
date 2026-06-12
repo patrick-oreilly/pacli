@@ -27,7 +27,9 @@ class Console(App):
 
     Input {
         dock: bottom;
-        margin: 1 2;
+        margin: 1 8;
+        border: none;
+        border-bottom: tall #00F0FF;
     }
 
     #thinking {

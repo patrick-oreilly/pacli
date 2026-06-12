@@ -66,6 +66,10 @@ class Console(App):
         self._pending_approvals: dict[str, dict[str, Any]] = {}
         self._is_streaming = False
         self._was_at_bottom = True
+        self._in_code_block = False
+        self._code_lang = ""
+        self._code_lines: list[str] = []
+        self._text_buf = ""
 
     def compose(self):
         yield Static(id="thinking", classes="hidden")
@@ -126,13 +130,76 @@ class Console(App):
 
     def _on_stream_started(self, data):
         self._is_streaming = True
+        self._text_buf = ""
+        self._in_code_block = False
+        self._code_lang = ""
+        self._code_lines = []
         self._thinking.remove_class("hidden")
         self._update_hud()
 
     def _on_token_received(self, token):
-        self._rich_log.write(token)
+        self._text_buf += token
+        while "\n" in self._text_buf:
+            newline_idx = self._text_buf.index("\n")
+            line = self._text_buf[:newline_idx]
+            remainder = self._text_buf[newline_idx + 1:]
+            self._text_buf = remainder
+            self._process_line(line + "\n")
+
+    def _process_line(self, line: str) -> None:
+        if not self._in_code_block:
+            stripped = line.lstrip()
+            if not stripped.startswith("```"):
+                self._rich_log.write(line)
+                return
+            after_fence = stripped[3:]
+            lang = after_fence.strip() if after_fence else ""
+            self._code_lang = lang
+            self._in_code_block = True
+            label = lang if lang else "code"
+            self._rich_log.write(f"[dim]◇ {label}[/dim]\n")
+            return
+
+        stripped = line.strip()
+        if stripped == "```":
+            self._flush_code_block()
+            self._in_code_block = False
+            self._code_lang = ""
+            return
+
+        self._code_lines.append(line)
+
+    def _flush_code_block(self) -> None:
+        if not self._code_lines:
+            return
+        code = "".join(self._code_lines)
+        self._code_lines = []
+        if not code.strip():
+            return
+        try:
+            from rich.syntax import Syntax
+            from pacli.console.syntax_theme import IcySyntaxStyle
+
+            lexer = self._code_lang or "text"
+            syntax = Syntax(
+                code,
+                lexer,
+                theme=IcySyntaxStyle,
+                background_color="#0D0D14",
+                word_wrap=False,
+            )
+            self._rich_log.write(syntax)
+        except Exception:
+            self._rich_log.write(code)
 
     def _on_stream_finished(self, data):
+        if self._text_buf:
+            self._rich_log.write(self._text_buf)
+            self._text_buf = ""
+        if self._in_code_block:
+            self._flush_code_block()
+            self._in_code_block = False
+            self._code_lang = ""
         self._is_streaming = False
         self._thinking.add_class("hidden")
         self._hud.add_class("hidden")

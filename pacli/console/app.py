@@ -161,7 +161,10 @@ class Console(App):
             else:
                 self._rich_log.write("! Answer y/n to approve or deny the pending request")
         elif self._event_bus:
-            await self._event_bus.emit("prompt_submitted", event.value)
+            if event.value.startswith("/"):
+                await self._event_bus.emit("slash_command", event.value)
+            else:
+                await self._event_bus.emit("prompt_submitted", event.value)
         else:
             self._rich_log.write("Hello from pacli!")
         event.input.value = ""

@@ -160,3 +160,85 @@ async def test_orchestrator_skips_execution_when_approval_denied():
     assert results[0]["tool"] == "execute_shell"
     assert "denied" in results[0]["error"].lower()
     orchestrator.cleanup()
+
+
+async def test_slash_command_provider_switch():
+    bus = EventBus()
+    system_events = []
+    bus.on("system_event", lambda d: system_events.append(d))
+
+    orchestrator = Orchestrator(
+        provider=MockAdapter(),
+        event_bus=bus,
+        provider_factory={"mock": MockAdapter, "ollama": MockAdapter},
+    )
+    await orchestrator._on_slash_command("/provider ollama")
+
+    assert len(system_events) == 1
+    assert "provider switched to ollama" in system_events[0]["message"]
+    orchestrator.cleanup()
+
+
+async def test_slash_command_model_switch():
+    bus = EventBus()
+    system_events = []
+    bus.on("system_event", lambda d: system_events.append(d))
+
+    orchestrator = Orchestrator(
+        provider=MockAdapter(),
+        event_bus=bus,
+    )
+    await orchestrator._on_slash_command("/model llama3.2")
+
+    assert len(system_events) == 1
+    assert "model switched to llama3.2" in system_events[0]["message"]
+    orchestrator.cleanup()
+
+
+async def test_slash_command_help():
+    bus = EventBus()
+    system_events = []
+    bus.on("system_event", lambda d: system_events.append(d))
+
+    orchestrator = Orchestrator(
+        provider=MockAdapter(),
+        event_bus=bus,
+    )
+    await orchestrator._on_slash_command("/help")
+
+    assert len(system_events) == 1
+    assert "available commands" in system_events[0]["message"]
+    orchestrator.cleanup()
+
+
+async def test_slash_command_unknown():
+    bus = EventBus()
+    system_events = []
+    bus.on("system_event", lambda d: system_events.append(d))
+
+    orchestrator = Orchestrator(
+        provider=MockAdapter(),
+        event_bus=bus,
+    )
+    await orchestrator._on_slash_command("/foobar")
+
+    assert len(system_events) == 1
+    assert "unknown command" in system_events[0]["message"]
+    orchestrator.cleanup()
+
+
+async def test_slash_command_unknown_provider():
+    bus = EventBus()
+    system_events = []
+    bus.on("system_event", lambda d: system_events.append(d))
+
+    orchestrator = Orchestrator(
+        provider=MockAdapter(),
+        event_bus=bus,
+        provider_factory={"mock": MockAdapter},
+    )
+    await orchestrator._on_slash_command("/provider none")
+
+    assert len(system_events) == 1
+    assert "unknown provider" in system_events[0]["message"]
+    orchestrator.cleanup()

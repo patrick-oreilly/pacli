@@ -17,17 +17,24 @@ class Orchestrator:
         event_bus: EventBus,
         tool_registry: ToolRegistry | None = None,
         policy: Policy | None = None,
+        provider_factory: dict[str, type] | None = None,
     ) -> None:
         self._provider = provider
         self._event_bus = event_bus
         self._tool_registry = tool_registry or ToolRegistry()
         self._policy = policy or Policy()
+        self._provider_factory = provider_factory or {}
+        self._active_provider_name = "mock"
+        self._active_model_name = "mock"
         self._pending_approvals: dict[str, asyncio.Future[bool]] = {}
         self._approval_handler = self._on_approval_response
+        self._slash_handler = self._on_slash_command
         self._event_bus.on("approval_response", self._approval_handler)
+        self._event_bus.on("slash_command", self._slash_handler)
 
     def cleanup(self) -> None:
         self._event_bus.off("approval_response", self._approval_handler)
+        self._event_bus.off("slash_command", self._slash_handler)
 
     def _on_approval_response(self, data: Any) -> None:
         approval_id = data.get("id")
@@ -61,9 +68,6 @@ class Orchestrator:
             await self._event_bus.emit("tool_result", {"tool": tool_name, "args": kwargs, "error": str(e)})
 
     async def process_prompt(self, prompt: str) -> None:
-        if prompt.startswith("/"):
-            await self._handle_slash_command(prompt)
-            return
         await self._event_bus.emit("stream_started")
         try:
             async for token in self._provider.stream_completion(prompt):
@@ -73,14 +77,26 @@ class Orchestrator:
         finally:
             await self._event_bus.emit("stream_finished")
 
-    async def _handle_slash_command(self, prompt: str) -> None:
-        parts = prompt.split(" ", 1)
-        cmd = parts[0]
+    async def _on_slash_command(self, data: str) -> None:
+        parts = data.split(" ", 1)
+        cmd = parts[0].lower()
         arg = parts[1].strip() if len(parts) > 1 else ""
-        if cmd == "/model" and arg:
+
+        if cmd == "/provider" and arg:
+            adapter_cls = self._provider_factory.get(arg)
+            if adapter_cls:
+                self._provider = adapter_cls()
+                self._active_provider_name = arg
+                message = f"·· runtime · provider switched to {arg}"
+            else:
+                available = list(self._provider_factory.keys()) if self._provider_factory else ["mock"]
+                message = f"·· runtime · unknown provider: {arg} (available: {', '.join(available)})"
+        elif cmd == "/model" and arg:
+            self._active_model_name = arg
             message = f"·· runtime · model switched to {arg}"
         elif cmd == "/help":
-            message = "·· runtime · available commands: /model <name>, /help"
+            message = "·· runtime · available commands: /model <name>, /provider <name>, /help"
         else:
             message = f"·· runtime · unknown command: {cmd}"
+
         await self._event_bus.emit("system_event", {"message": message})

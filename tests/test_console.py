@@ -181,3 +181,150 @@ async def test_console_emits_denied_on_n_input():
         assert len(responses) == 1
         assert responses[0]["id"] == "test-3"
         assert responses[0]["approved"] is False
+
+
+async def test_slash_command_intercepts_and_emits_event():
+    bus = EventBus()
+    slash_events = []
+    prompt_events = []
+
+    def on_slash(data):
+        slash_events.append(data)
+
+    def on_prompt(data):
+        prompt_events.append(data)
+
+    bus.on("slash_command", on_slash)
+    bus.on("prompt_submitted", on_prompt)
+
+    app = Console(event_bus=bus)
+    async with app.run_test() as pilot:
+        input_widget = app.query_one(Input)
+        input_widget.focus()
+        input_widget.value = "/provider ollama"
+        await pilot.press("enter")
+
+        assert len(slash_events) == 1
+        assert slash_events[0] == "/provider ollama"
+        assert len(prompt_events) == 0
+
+
+async def test_slash_command_provider_switches_and_displays_system_event():
+    bus = EventBus()
+    orchestrator = Orchestrator(
+        provider=MockAdapter(),
+        event_bus=bus,
+        provider_factory={"mock": MockAdapter, "ollama": MockAdapter},
+    )
+    bus.on("slash_command", orchestrator._on_slash_command)
+
+    app = Console(event_bus=bus)
+    async with app.run_test() as pilot:
+        input_widget = app.query_one(Input)
+        input_widget.focus()
+        input_widget.value = "/provider ollama"
+        await pilot.press("enter")
+
+        output = app.query_one(RichLog)
+        output_text = "\n".join(str(line) for line in output.lines)
+        assert "provider switched to ollama" in output_text
+
+
+async def test_slash_command_model_displays_system_event():
+    bus = EventBus()
+    orchestrator = Orchestrator(
+        provider=MockAdapter(),
+        event_bus=bus,
+    )
+    bus.on("slash_command", orchestrator._on_slash_command)
+
+    app = Console(event_bus=bus)
+    async with app.run_test() as pilot:
+        input_widget = app.query_one(Input)
+        input_widget.focus()
+        input_widget.value = "/model llama3.2"
+        await pilot.press("enter")
+
+        output = app.query_one(RichLog)
+        output_text = "\n".join(str(line) for line in output.lines)
+        assert "model switched to llama3.2" in output_text
+
+
+async def test_slash_command_help_displays_available_commands():
+    bus = EventBus()
+    orchestrator = Orchestrator(
+        provider=MockAdapter(),
+        event_bus=bus,
+    )
+    bus.on("slash_command", orchestrator._on_slash_command)
+
+    app = Console(event_bus=bus)
+    async with app.run_test() as pilot:
+        input_widget = app.query_one(Input)
+        input_widget.focus()
+        input_widget.value = "/help"
+        await pilot.press("enter")
+
+        output = app.query_one(RichLog)
+        output_text = "\n".join(str(line) for line in output.lines)
+        assert "available commands" in output_text
+
+
+async def test_non_slash_input_still_routes_as_prompt():
+    bus = EventBus()
+    adapter = MockAdapter()
+    orchestrator = Orchestrator(provider=adapter, event_bus=bus)
+    bus.on("prompt_submitted", orchestrator.process_prompt)
+
+    app = Console(event_bus=bus)
+    async with app.run_test() as pilot:
+        input_widget = app.query_one(Input)
+        input_widget.focus()
+        input_widget.value = "hello world"
+        await pilot.press("enter")
+
+        output = app.query_one(RichLog)
+        output_text = "\n".join(str(line) for line in output.lines)
+        assert "Hello" in output_text
+        assert "MockAdapter" in output_text
+
+
+async def test_slash_command_unknown_provider_shows_error():
+    bus = EventBus()
+    orchestrator = Orchestrator(
+        provider=MockAdapter(),
+        event_bus=bus,
+        provider_factory={"mock": MockAdapter},
+    )
+    bus.on("slash_command", orchestrator._on_slash_command)
+
+    app = Console(event_bus=bus)
+    async with app.run_test() as pilot:
+        input_widget = app.query_one(Input)
+        input_widget.focus()
+        input_widget.value = "/provider none"
+        await pilot.press("enter")
+
+        output = app.query_one(RichLog)
+        output_text = "\n".join(str(line) for line in output.lines)
+        assert "unknown provider" in output_text
+
+
+async def test_slash_command_unknown_displays_message():
+    bus = EventBus()
+    orchestrator = Orchestrator(
+        provider=MockAdapter(),
+        event_bus=bus,
+    )
+    bus.on("slash_command", orchestrator._on_slash_command)
+
+    app = Console(event_bus=bus)
+    async with app.run_test() as pilot:
+        input_widget = app.query_one(Input)
+        input_widget.focus()
+        input_widget.value = "/foobar"
+        await pilot.press("enter")
+
+        output = app.query_one(RichLog)
+        output_text = "\n".join(str(line) for line in output.lines)
+        assert "unknown command" in output_text

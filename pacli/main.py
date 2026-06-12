@@ -23,7 +23,13 @@ def main():
     tool_registry = ToolRegistry()
     tool_registry.register_tool(read_file_tool)
     tool_registry.register_tool(shell_tool)
-    orchestrator = Orchestrator(provider=MockAdapter(), event_bus=bus, tool_registry=tool_registry, policy=policy)
+    orchestrator = Orchestrator(
+        provider=MockAdapter(),
+        event_bus=bus,
+        tool_registry=tool_registry,
+        policy=policy,
+        provider_factory={"mock": MockAdapter},
+    )
 
     bus.on("prompt_submitted", orchestrator.process_prompt)
 

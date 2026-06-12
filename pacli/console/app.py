@@ -52,14 +52,6 @@ class Console(App):
         background: $accent;
     }
 
-    #streaming-line {
-        dock: bottom;
-        height: auto;
-        min-height: 1;
-        color: #D0D0D0;
-        padding: 0 1;
-    }
-
     #thinking {
         dock: bottom;
         height: 1;
@@ -98,7 +90,6 @@ class Console(App):
         self._event_bus = event_bus
         self._model = model or "mock"
         self._rich_log: Optional[RichLog] = None
-        self._streaming_line: Optional[Static] = None
         self._thinking: Optional[Static] = None
         self._hud: Optional[Static] = None
         self._spinner_timer: Optional[Timer] = None
@@ -106,10 +97,6 @@ class Console(App):
         self._pending_approvals: dict[str, dict[str, Any]] = {}
         self._is_streaming = False
         self._was_at_bottom = True
-        self._in_code_block = False
-        self._code_lang = ""
-        self._code_lines: list[str] = []
-        self._text_buf = ""
         self._error_active = False
         self._last_prompt = ""
         self._error_line_start = 0
@@ -120,14 +107,12 @@ class Console(App):
 
     def compose(self):
         yield RichLog(wrap=True)
-        yield Static(id="streaming-line", classes="hidden")
         yield Static(id="thinking", classes="hidden")
         yield Static(id="hud", classes="hidden")
         yield Input()
 
     def on_mount(self):
         self._rich_log = self.query_one(RichLog)
-        self._streaming_line = self.query_one("#streaming-line")
         self._thinking = self.query_one("#thinking")
         self._hud = self.query_one("#hud")
         self._write_boot_telemetry()
@@ -142,7 +127,6 @@ class Console(App):
             self._event_bus.on(EventType.PROMPT_ERROR, self._on_prompt_error)
             self._event_bus.on(EventType.SYSTEM_EVENT, self._on_system_event)
             self._event_bus.on(EventType.SYSTEM_FAULT, self._on_system_fault)
-            self._event_bus.on(EventType.PROMPT_SUBMITTED, self._on_prompt_submitted)
 
     def _check_scroll(self):
         if not self._rich_log:
@@ -184,87 +168,16 @@ class Console(App):
 
     def _on_stream_started(self, data):
         self._is_streaming = True
-        self._text_buf = ""
-        self._in_code_block = False
-        self._code_lang = ""
-        self._code_lines = []
         self._error_active = False
-        self._streaming_line.add_class("hidden")
         self._start_spinner()
         self._update_hud()
 
     def _on_token_received(self, token):
         if hasattr(token, 'text'):
             token = token.text
-        self._text_buf += token
-        while "\n" in self._text_buf:
-            newline_idx = self._text_buf.index("\n")
-            line = self._text_buf[:newline_idx]
-            remainder = self._text_buf[newline_idx + 1:]
-            self._text_buf = remainder
-            self._process_line(line + "\n")
-        if self._text_buf:
-            self._streaming_line.remove_class("hidden")
-            self._streaming_line.update(self._text_buf)
-        else:
-            self._streaming_line.add_class("hidden")
-
-    def _process_line(self, line: str) -> None:
-        self._streaming_line.add_class("hidden")
-        if not self._in_code_block:
-            stripped = line.lstrip()
-            if not stripped.startswith("```"):
-                self._rich_log.write(line)
-                return
-            after_fence = stripped[3:]
-            lang = after_fence.strip() if after_fence else ""
-            self._code_lang = lang
-            self._in_code_block = True
-            label = lang if lang else "code"
-            self._rich_log.write(Text(f"▸ {label}\n", style="dim #6A6A6A"))
-            return
-
-        stripped = line.strip()
-        if stripped == "```":
-            self._flush_code_block()
-            self._in_code_block = False
-            self._code_lang = ""
-            return
-
-        self._code_lines.append(line)
-
-    def _flush_code_block(self) -> None:
-        if not self._code_lines:
-            return
-        code = "".join(self._code_lines)
-        self._code_lines = []
-        if not code.strip():
-            return
-        try:
-            from rich.syntax import Syntax
-            from pacli.console.syntax_theme import IcySyntaxStyle
-
-            lexer = self._code_lang or "text"
-            syntax = Syntax(
-                code,
-                lexer,
-                theme=IcySyntaxStyle,
-                background_color="#0D0D14",
-                word_wrap=True,
-            )
-            self._rich_log.write(syntax)
-        except Exception:
-            self._rich_log.write(code)
+        self._rich_log.write(token)
 
     def _on_stream_finished(self, data):
-        self._streaming_line.add_class("hidden")
-        if self._text_buf:
-            self._rich_log.write(self._text_buf)
-            self._text_buf = ""
-        if self._in_code_block:
-            self._flush_code_block()
-            self._in_code_block = False
-            self._code_lang = ""
         self._is_streaming = False
         self._stop_spinner()
         self._hud.add_class("hidden")
@@ -473,12 +386,6 @@ class Console(App):
         except Exception:
             return "unknown"
 
-    def _on_prompt_submitted(self, text: str) -> None:
-        if not self._rich_log:
-            return
-        self._rich_log.write(Text(""))
-        self._rich_log.write(Text(f"▸ {text}", style="bold #B0B0C0"))
-
     async def on_input_submitted(self, event: Input.Submitted):
         if self._error_active:
             self._vanish_error()
@@ -486,12 +393,16 @@ class Console(App):
             if new_prompt:
                 self._last_prompt = new_prompt
             if self._event_bus and self._last_prompt:
+                self._rich_log.write(Text(""))
+                self._rich_log.write(Text(f"▸ {self._last_prompt}", style="bold #B0B0C0"))
                 await self._event_bus.emit(EventType.PROMPT_SUBMITTED, self._last_prompt)
         elif self._event_bus:
             if event.value.startswith("/"):
                 await self._event_bus.emit(EventType.SLASH_COMMAND, event.value)
             else:
                 self._last_prompt = event.value
+                self._rich_log.write(Text(""))
+                self._rich_log.write(Text(f"▸ {event.value}", style="bold #B0B0C0"))
                 await self._event_bus.emit(EventType.PROMPT_SUBMITTED, event.value)
         else:
             self._rich_log.write("Hello from pacli!")

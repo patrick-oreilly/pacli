@@ -21,6 +21,7 @@ class Orchestrator:
         loop_max_iterations: int = 20,
         system_prompt: str | None = None,
         provider_name: str = "mock",
+        tools_enabled: bool = False,
     ) -> None:
         self._provider = provider
         self._event_bus = event_bus
@@ -30,6 +31,7 @@ class Orchestrator:
         self._active_provider_name = provider_name
         self._active_model_name = "mock"
         self._system_prompt = system_prompt
+        self._tools_enabled = tools_enabled
         self._loop_max_iterations = loop_max_iterations
         self._pending_approvals: dict[str, asyncio.Future[bool]] = {}
         self._approval_handler = self._on_approval_response
@@ -95,7 +97,7 @@ class Orchestrator:
                 if self._system_prompt:
                     messages.append(Message(role="system", content=self._system_prompt))
                 messages.append(Message(role="user", content=prompt))
-                tool_schemas = self._tool_registry.tool_schemas
+                tool_schemas = self._tool_registry.tool_schemas if self._tools_enabled else None
                 for _ in range(self._loop_max_iterations):
                     text_chunks: list[str] = []
                     tool_calls: list[ToolCall] = []
@@ -154,8 +156,11 @@ class Orchestrator:
             if hasattr(self._provider, "_model"):
                 self._provider._model = arg
             message = f"·· runtime · model switched to {arg}"
+        elif cmd == "/tools" and arg in ("on", "off"):
+            self._tools_enabled = arg == "on"
+            message = f"·· runtime · tools {'enabled' if self._tools_enabled else 'disabled'}"
         elif cmd == "/help":
-            message = "·· runtime · available commands: /model <name>, /provider <name>, /help"
+            message = "·· runtime · available commands: /model <name>, /provider <name>, /tools on|off, /help"
         else:
             message = f"·· runtime · unknown command: {cmd}"
 

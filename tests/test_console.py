@@ -400,122 +400,6 @@ async def test_hud_shift_g_binding_registered():
         assert any(b.key == "shift+g" for b in app.BINDINGS)
 
 
-async def test_code_block_header_renders_with_language():
-    bus = EventBus()
-    app = Console(event_bus=bus)
-    async with app.run_test() as pilot:
-        await bus.emit("stream_started")
-        await bus.emit("token_received", "Some text\n```python\n")
-        output = app.query_one(RichLog)
-        assert any("Some text" in str(line) for line in output.lines)
-        assert any("python" in str(line) for line in output.lines)
-
-
-async def test_code_block_header_renders_without_language():
-    bus = EventBus()
-    app = Console(event_bus=bus)
-    async with app.run_test() as pilot:
-        await bus.emit("stream_started")
-        await bus.emit("token_received", "```\n")
-        output = app.query_one(RichLog)
-        assert any("code" in str(line) for line in output.lines)
-
-
-async def test_code_block_closing_fence_flushes_highlighted_code():
-    bus = EventBus()
-    app = Console(event_bus=bus)
-    async with app.run_test() as pilot:
-        await bus.emit("stream_started")
-        await bus.emit("token_received", "```python\nprint('hello')\n```\n")
-        output = app.query_one(RichLog)
-        assert any("print" in str(line) for line in output.lines)
-        assert any("hello" in str(line) for line in output.lines)
-        assert not any("```" in str(line) for line in output.lines)
-
-
-async def test_code_block_syntax_highlighting_applied():
-    bus = EventBus()
-    app = Console(event_bus=bus)
-    async with app.run_test() as pilot:
-        await bus.emit("stream_started")
-        await bus.emit("token_received", "```python\ndef foo():\n    return 42\n```\n")
-        output = app.query_one(RichLog)
-        rendered = "\n".join(str(line) for line in output.lines)
-        assert "def" in rendered
-        assert "foo" in rendered
-        assert "return" in rendered
-        assert "42" in rendered
-        assert "```" not in rendered
-
-
-async def test_multiple_code_blocks_in_stream():
-    bus = EventBus()
-    app = Console(event_bus=bus)
-    async with app.run_test() as pilot:
-        await bus.emit("stream_started")
-        await bus.emit("token_received", "```python\nx = 1\n```\n")
-        await bus.emit("token_received", "text between\n")
-        await bus.emit("token_received", "```python\ny = 2\n```\n")
-        output = app.query_one(RichLog)
-        rendered = "\n".join(str(line) for line in output.lines)
-        assert "text between" in rendered
-        assert "```" not in rendered
-        assert "▸ python" in rendered
-
-
-async def test_code_block_unclosed_flushed_on_stream_finished():
-    bus = EventBus()
-    app = Console(event_bus=bus)
-    async with app.run_test() as pilot:
-        await bus.emit("stream_started")
-        await bus.emit("token_received", "```python\nprint('unclosed')\n")
-        await bus.emit("stream_finished")
-        output = app.query_one(RichLog)
-        rendered = "\n".join(str(line) for line in output.lines)
-        assert "print" in rendered
-        assert "unclosed" in rendered
-
-
-async def test_code_block_streamed_token_by_token():
-    bus = EventBus()
-    app = Console(event_bus=bus)
-    async with app.run_test() as pilot:
-        await bus.emit("stream_started")
-        for token in ["```", "python", "\n", "print", "('", "hello", "')", "\n", "```", "\n"]:
-            await bus.emit("token_received", token)
-        output = app.query_one(RichLog)
-        rendered = "\n".join(str(line) for line in output.lines)
-        assert "print" in rendered
-        assert "hello" in rendered
-        assert "```" not in rendered
-
-
-async def test_code_block_backticks_not_rendered():
-    bus = EventBus()
-    app = Console(event_bus=bus)
-    async with app.run_test() as pilot:
-        await bus.emit("stream_started")
-        await bus.emit("token_received", "```\ncode here\n```\n")
-        output = app.query_one(RichLog)
-        rendered = "\n".join(str(line) for line in output.lines)
-        assert "```" not in rendered
-        assert "code here" in rendered
-
-
-async def test_code_block_stream_resets_state():
-    bus = EventBus()
-    app = Console(event_bus=bus)
-    async with app.run_test() as pilot:
-        await bus.emit("stream_started")
-        await bus.emit("token_received", "```python\nx = 1\n```\n")
-        await bus.emit("stream_finished")
-        await bus.emit("stream_started")
-        await bus.emit("token_received", "fresh text\n")
-        output = app.query_one(RichLog)
-        rendered = "\n".join(str(line) for line in output.lines)
-        assert "fresh text" in rendered
-
-
 async def test_system_fault_displays_dim_line(tmp_path: Path):
     crash_log = tmp_path / "crash.log"
     original = Console._crash_log_path
@@ -570,26 +454,25 @@ async def test_user_prompt_renders_with_prefix_and_color():
     bus = EventBus()
     app = Console(event_bus=bus)
     async with app.run_test() as pilot:
-        await bus.emit("prompt_submitted", "hello world")
+        input_widget = app.query_one(Input)
+        input_widget.value = "hello world"
+        await input_widget.action_submit()
+        await pilot.pause()
         output = app.query_one(RichLog)
-        assert len(output.lines) > 0
-
-        found = False
-        for line in output.lines:
-            line_str = line.text
-            if "hello world" in line_str:
-                assert "▸ hello world" in line_str
-                found = True
-                break
-        assert found
+        assert any("▸ hello world" in line.text for line in output.lines)
 
 
 async def test_user_prompt_has_blank_line_separator():
     bus = EventBus()
     app = Console(event_bus=bus)
     async with app.run_test() as pilot:
-        await bus.emit("prompt_submitted", "first")
-        await bus.emit("prompt_submitted", "second")
+        input_widget = app.query_one(Input)
+        input_widget.value = "first"
+        await input_widget.action_submit()
+        await pilot.pause()
+        input_widget.value = "second"
+        await input_widget.action_submit()
+        await pilot.pause()
         output = app.query_one(RichLog)
         output_text = "\n".join(line.text for line in output.lines)
         assert "▸ first" in output_text

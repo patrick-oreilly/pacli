@@ -12,6 +12,7 @@ class Config:
     base_url: str = "http://localhost:11434/v1"
     model: str = "llama3.2"
     loop_max_iterations: int = 20
+    tools_enabled: bool = False
 
     def load_system_prompt(self) -> str:
         path = importlib.resources.files("pacli") / "prompts" / "system.md"

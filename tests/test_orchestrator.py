@@ -501,3 +501,72 @@ async def test_provider_name_init():
     )
     assert orchestrator._active_provider_name == "ollama"
     orchestrator.cleanup()
+
+
+async def test_tools_disabled_does_not_send_schemas():
+    bus = EventBus()
+
+    captured_schemas: list = []
+
+    class StubProvider:
+        async def stream_completion(self, messages, tool_schemas=None):
+            captured_schemas.append(tool_schemas)
+            yield TextToken(text="ok")
+
+    orchestrator = Orchestrator(
+        provider=StubProvider(),
+        event_bus=bus,
+        tools_enabled=False,
+    )
+    await orchestrator.process_prompt("hello")
+
+    assert captured_schemas[0] is None
+    orchestrator.cleanup()
+
+
+async def test_tools_enabled_sends_schemas():
+    bus = EventBus()
+
+    captured_schemas: list = []
+
+    class StubProvider:
+        async def stream_completion(self, messages, tool_schemas=None):
+            captured_schemas.append(tool_schemas)
+            yield TextToken(text="ok")
+
+    tool_registry = ToolRegistry()
+    tool_registry.register_tool(ReadFileTool(sandbox=LocalSandbox(workspace_root="/tmp")))
+
+    orchestrator = Orchestrator(
+        provider=StubProvider(),
+        event_bus=bus,
+        tool_registry=tool_registry,
+        tools_enabled=True,
+    )
+    await orchestrator.process_prompt("hello")
+
+    assert captured_schemas[0] is not None
+    orchestrator.cleanup()
+
+
+async def test_tools_slash_command():
+    bus = EventBus()
+    system_events = []
+    bus.on("system_event", lambda d: system_events.append(d))
+
+    orchestrator = Orchestrator(
+        provider=MockAdapter(),
+        event_bus=bus,
+    )
+    assert orchestrator._tools_enabled is False
+
+    await orchestrator._on_slash_command("/tools on")
+    assert orchestrator._tools_enabled is True
+    assert "tools enabled" in system_events[0]["message"]
+
+    system_events.clear()
+    await orchestrator._on_slash_command("/tools off")
+    assert orchestrator._tools_enabled is False
+    assert "tools disabled" in system_events[0]["message"]
+
+    orchestrator.cleanup()

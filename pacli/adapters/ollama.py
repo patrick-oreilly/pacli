@@ -94,6 +94,8 @@ class OllamaAdapter:
 
             if finish_reason == "tool_calls":
                 for buf in tool_call_buffers.values():
+                    if not buf["name"]:
+                        continue
                     try:
                         args = json.loads(buf["args_str"])
                     except json.JSONDecodeError:

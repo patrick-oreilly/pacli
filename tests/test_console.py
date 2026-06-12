@@ -51,9 +51,9 @@ async def test_console_displays_tool_result():
     async with app.run_test() as pilot:
         await bus.emit("tool_result", {"tool": "read_file", "args": {"path": "test.txt"}, "result": "file content here"})
         output = app.query_one(RichLog)
-        output_text = "\n".join(str(line) for line in output.lines)
+        output_text = "\n".join(line.text for line in output.lines)
         assert "▶ read_file(path='test.txt')" in output_text
-        assert "→ [exit 0]" in output_text
+        assert "→ ok" in output_text
 
 
 async def test_tool_result_success_shows_dim_exit_zero():
@@ -62,9 +62,9 @@ async def test_tool_result_success_shows_dim_exit_zero():
     async with app.run_test() as pilot:
         await bus.emit("tool_result", {"tool": "execute_shell", "args": {"command": "echo hi"}, "result": "hi\n"})
         output = app.query_one(RichLog)
-        output_text = "\n".join(str(line) for line in output.lines)
+        output_text = "\n".join(line.text for line in output.lines)
         assert "▶ execute_shell(command='echo hi')" in output_text
-        assert "→ [exit 0]" in output_text
+        assert "→ ok" in output_text
 
 
 async def test_tool_result_error_shows_amber_exit_one():
@@ -73,9 +73,9 @@ async def test_tool_result_error_shows_amber_exit_one():
     async with app.run_test() as pilot:
         await bus.emit("tool_result", {"tool": "execute_shell", "args": {"command": "rm --no-preserve-root /"}, "error": "Permission denied"})
         output = app.query_one(RichLog)
-        output_text = "\n".join(str(line) for line in output.lines)
+        output_text = "\n".join(line.text for line in output.lines)
         assert "▶ execute_shell(command='rm --no-preserve-root /')" in output_text
-        assert "→ [exit 1]" in output_text
+        assert "✖ Permission denied" in output_text
 
 
 async def test_tool_result_denied_shows_dim_denied():
@@ -84,9 +84,9 @@ async def test_tool_result_denied_shows_dim_denied():
     async with app.run_test() as pilot:
         await bus.emit("tool_result", {"tool": "execute_shell", "args": {"command": "rm -rf /"}, "error": "Approval denied by user"})
         output = app.query_one(RichLog)
-        output_text = "\n".join(str(line) for line in output.lines)
+        output_text = "\n".join(line.text for line in output.lines)
         assert "▶ execute_shell(command='rm -rf /')" in output_text
-        assert "→ [denied]" in output_text
+        assert "→ denied" in output_text
 
 
 async def test_tool_result_no_args_shows_tool_name_only():
@@ -95,9 +95,9 @@ async def test_tool_result_no_args_shows_tool_name_only():
     async with app.run_test() as pilot:
         await bus.emit("tool_result", {"tool": "unknown_tool", "result": "ok"})
         output = app.query_one(RichLog)
-        output_text = "\n".join(str(line) for line in output.lines)
+        output_text = "\n".join(line.text for line in output.lines)
         assert "▶ unknown_tool" in output_text
-        assert "→ [exit 0]" in output_text
+        assert "→ ok" in output_text
 
 
 async def test_thinking_indicator_shows_during_streaming_and_hides_after():
@@ -142,8 +142,8 @@ async def test_console_shows_approval_prompt_when_approval_required():
             {"id": "test-1", "tool": "execute_shell", "command": "echo hi"},
         )
         output = app.query_one(RichLog)
-        assert any("approval required" in str(line).lower() for line in output.lines)
-        assert any("echo hi" in str(line) for line in output.lines)
+        assert any("Approve" in line.text for line in output.lines)
+        assert any("echo hi" in line.text for line in output.lines)
 
 
 async def test_console_emits_approved_on_y_input():
@@ -576,9 +576,9 @@ async def test_user_prompt_renders_with_prefix_and_color():
 
         found = False
         for line in output.lines:
-            line_str = str(line)
+            line_str = line.text
             if "hello world" in line_str:
-                assert "> hello world" in line_str
+                assert "▸ hello world" in line_str
                 found = True
                 break
         assert found
@@ -591,9 +591,9 @@ async def test_user_prompt_has_blank_line_separator():
         await bus.emit("prompt_submitted", "first")
         await bus.emit("prompt_submitted", "second")
         output = app.query_one(RichLog)
-        output_text = "\n".join(str(line) for line in output.lines)
-        assert "> first" in output_text
-        assert "> second" in output_text
+        output_text = "\n".join(line.text for line in output.lines)
+        assert "▸ first" in output_text
+        assert "▸ second" in output_text
 
 
 async def test_boot_telemetry_writes_header_with_cyan_dot():
@@ -608,7 +608,7 @@ async def test_boot_telemetry_writes_context_line_with_model_dir_branch():
     app = Console(model="MockAdapter")
     async with app.run_test() as pilot:
         output = app.query_one(RichLog)
-        output_text = "\n".join(str(line) for line in output.lines)
+        output_text = "\n".join(line.text for line in output.lines)
         assert "model: MockAdapter" in output_text
         assert "· dir:" in output_text
         assert "· branch:" in output_text

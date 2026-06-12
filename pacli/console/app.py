@@ -4,7 +4,6 @@ import subprocess
 from pathlib import Path
 from typing import Any, Optional
 
-from rich.align import Align
 from rich.text import Text
 from textual.app import App
 from textual.binding import Binding
@@ -30,10 +29,11 @@ class Console(App):
 
     RichLog {
         height: 1fr;
-        padding: 1;
+        padding: 2 2;
         border: none;
         background: #0A0A0F;
         scrollbar-size-vertical: 1;
+        scrollbar-size-horizontal: 0;
         scrollbar-background: #0A0A0F;
         scrollbar-color: #2A2A2A;
         scrollbar-color-hover: #5A5A5A;
@@ -225,16 +225,20 @@ class Console(App):
             from pacli.console.syntax_theme import IcySyntaxStyle
 
             lexer = self._code_lang or "text"
+            self._rich_log.write(Text("─" * 40, style="dim #2A2A3A"))
             syntax = Syntax(
                 code,
                 lexer,
                 theme=IcySyntaxStyle,
                 background_color="#0D0D14",
-                word_wrap=False,
+                word_wrap=True,
             )
             self._rich_log.write(syntax)
+            self._rich_log.write(Text("─" * 40, style="dim #2A2A3A"))
         except Exception:
+            self._rich_log.write(Text("─" * 40, style="dim #2A2A3A"))
             self._rich_log.write(code)
+            self._rich_log.write(Text("─" * 40, style="dim #2A2A3A"))
 
     def _on_stream_finished(self, data):
         if self._text_buf:
@@ -249,46 +253,64 @@ class Console(App):
         self._hud.add_class("hidden")
         self._hud.remove_class("hud-streaming")
 
+    @staticmethod
+    def _truncate_arg(val: Any, max_len: int = 60) -> str:
+        s = str(val)
+        if len(s) <= max_len:
+            return repr(val)
+        head = max_len // 2 - 1
+        tail = max_len // 2 - 2
+        return s[:head] + "…" + s[-tail:]
+
+    @staticmethod
+    def _format_args(args: dict[str, Any]) -> str:
+        parts = []
+        for k, v in args.items():
+            parts.append(f"{k}={Console._truncate_arg(v)}")
+        return ", ".join(parts)
+
     def _on_tool_used(self, data):
         tool = data.get("tool", "unknown")
         args = data.get("args", {})
-        args_repr = ", ".join(f"{k}={v!r}" for k, v in args.items())
+        args_repr = self._format_args(args)
         call_line = f"▸ {tool}({args_repr})" if args_repr else f"▸ {tool}"
-        self._rich_log.write(Text(call_line, style="dim #888888"))
+        self._rich_log.write(Text(call_line, style="dim #6A6A6A"))
 
     def _on_tool_result(self, data):
         tool = data.get("tool", "unknown")
         if tool == "_loop":
             return
         args = data.get("args", {})
-        args_repr = ", ".join(f"{k}={v!r}" for k, v in args.items())
-        call_line = f"  ▶ {tool}({args_repr})" if args_repr else f"  ▶ {tool}"
+        args_repr = self._format_args(args)
+        call_line = f"  ▶ {tool}" if not args_repr else f"  ▶ {tool}({args_repr})"
 
         if "error" in data:
             error = data["error"]
             is_denied = error == "Approval denied by user"
             if is_denied:
-                line = f"{call_line} → [denied]"
-                self._rich_log.write(Text(line, style="dim #888888"))
+                line = f"{call_line}  [dim]→ denied[/dim]"
+                self._rich_log.write(Text(line, style="#6A6A6A"))
             else:
-                line = f"{call_line} → [exit 1]"
-                self._rich_log.write(Text(line, style="bold #FF8C00"))
+                line = f"{call_line}  [#E06C75]✖ {error}[/#E06C75]"
+                self._rich_log.write(Text.from_markup(line))
         else:
-            line = f"{call_line} → [exit 0]"
-            self._rich_log.write(Text(line, style="dim #888888"))
+            line = f"{call_line}  [dim]→ ok[/dim]"
+            self._rich_log.write(Text.from_markup(line))
 
     def _on_system_event(self, data: dict[str, Any]) -> None:
         message = data.get("message", "")
-        text = Text(message, style="dim #888888")
-        centered = Align.center(text)
-        self._rich_log.write(centered)
+        text = Text(message, style="dim #5A5A6A")
+        self._rich_log.write(text)
 
     def _on_prompt_error(self, data):
         self._error_active = True
         self._error_line_start = len(self._rich_log.lines)
         msg = data.get('error', 'Unknown error')
         self._rich_log.write(
-            f"[#FF6B6B]■ Connection Failed: {msg}. Press [Enter] to retry.[/#FF6B6B]"
+            Text(f"  ✖ Connection failed: {msg}", style="#E06C75")
+        )
+        self._rich_log.write(
+            Text("    Press Enter to retry", style="dim #6A6A6A")
         )
 
     def _vanish_error(self) -> None:
@@ -312,7 +334,9 @@ class Console(App):
         crash_path.parent.mkdir(parents=True, exist_ok=True)
         crash_path.write_text(tb)
         if self._rich_log:
-            self._rich_log.write(f"[dim]·· System fault. Session saved to {crash_path}[/dim]")
+            self._rich_log.write(
+                Text(f"  System fault, saved to {crash_path}", style="dim #6A6A6A")
+            )
         if input_widget := self.query_one(Input):
             input_widget.value = ""
 
@@ -324,11 +348,15 @@ class Console(App):
         self._approval_pending = True
         self._approval_data = data
         self._approval_line_start = len(self._rich_log.lines)
-        args_display = f'"{command}"' if command else ""
-        self._rich_log.write(f"[#FFB347]⚠ Approval required[/#FFB347]")
-        self._rich_log.write(f"[#FFB347]  Tool: {tool}({args_display})[/#FFB347]")
-        self._rich_log.write(f"[#FFB347]  Blast radius: may modify filesystem state[/#FFB347]")
-        self._rich_log.write(f"[#FFB347]  [y] approve  [n] deny[/#FFB347]")
+        args_display = f" {command}" if command else ""
+        self._rich_log.write(Text.assemble(
+            ("⚠", "#FFB347"),
+            (f" Approve ", "#FFB347"),
+            (f"{tool}{args_display}", "#D0A060"),
+        ))
+        self._rich_log.write(
+            Text("    [y] approve  [n] deny", style="dim #6A6A6A")
+        )
         self._bindings.bind("y", "approval_yes", "Approve", priority=True)
         self._bindings.bind("n", "approval_no", "Deny", priority=True)
 
@@ -346,9 +374,11 @@ class Console(App):
             self._rich_log.write(line.text)
         tool = self._approval_data.get("tool", "unknown")
         command = self._approval_data.get("command", "")
-        args_display = f'"{command}"' if command else ""
+        args_display = f" {command}" if command else ""
         status = "approved" if approved else "denied"
-        self._rich_log.write(f"[dim]▶ {tool}({args_display}) → [{status}][/dim]")
+        self._rich_log.write(
+            Text(f"{tool}{args_display} → {status}", style="dim #6A6A6A")
+        )
         approval_id = self._approval_data.get("id")
         if self._event_bus:
             asyncio.get_running_loop().create_task(
@@ -388,13 +418,23 @@ class Console(App):
     def _write_boot_telemetry(self) -> None:
         if not self._rich_log:
             return
-        self._rich_log.write(f"[#00F0FF]●[/#00F0FF] [white]pacli v{__version__}[/white]")
+        header = Text.assemble(
+            ("●", "#00F0FF"),
+            (f" pacli v{__version__}", "bold #D0D0D0"),
+        )
+        self._rich_log.write(header)
 
         cwd = os.getcwd()
         branch = self._get_git_branch()
-        self._rich_log.write(
-            f"[dim #888888]model: {self._model} · dir: {cwd} · branch: {branch}[/dim #888888]"
+        context = Text.assemble(
+            ("model: ", "#6A6A6A"),
+            (self._model, "#888888"),
+            (" · dir: ", "#6A6A6A"),
+            (cwd, "#888888"),
+            (" · branch: ", "#6A6A6A"),
+            (branch, "#888888"),
         )
+        self._rich_log.write(context)
 
     @staticmethod
     def _get_git_branch() -> str:
@@ -413,9 +453,8 @@ class Console(App):
     def _on_prompt_submitted(self, text: str) -> None:
         if not self._rich_log:
             return
-        self._rich_log.write("")
-        prompt_text = Text(f"> {text}", style="#D0D0D0")
-        self._rich_log.write(prompt_text)
+        self._rich_log.write(Text(""))
+        self._rich_log.write(Text(f"▸ {text}", style="bold #B0B0C0"))
 
     async def on_input_submitted(self, event: Input.Submitted):
         if self._error_active:

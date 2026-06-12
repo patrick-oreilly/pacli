@@ -15,8 +15,13 @@ BRAILLE_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇",
 
 class Console(App):
     CSS = """
+    $accent: #00F0FF;
+    $secondary: #888888;
+
     Screen {
         layout: vertical;
+        background: #0A0A0F;
+        border: none;
     }
 
     RichLog {
@@ -29,13 +34,13 @@ class Console(App):
         dock: bottom;
         margin: 1 8;
         border: none;
-        border-bottom: tall #00F0FF;
+        border-bottom: tall $accent;
     }
 
     #thinking {
         dock: bottom;
         height: 1;
-        color: #00F0FF;
+        color: $accent;
         padding: 0 1;
     }
 

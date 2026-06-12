@@ -34,6 +34,10 @@ class Console(App):
         margin: 1 2;
     }
 
+    Input > .input--cursor {
+        background: #00F0FF;
+    }
+
     #thinking {
         dock: bottom;
         height: 1;
@@ -70,6 +74,8 @@ class Console(App):
     def on_mount(self):
         self._rich_log = self.query_one(RichLog)
         self._thinking = self.query_one("#thinking")
+        input_widget = self.query_one(Input)
+        input_widget.cursor_blink = False
         self._write_boot_telemetry()
         if self._event_bus:
             self._event_bus.on("stream_started", self._on_stream_started)

@@ -2,6 +2,8 @@ import asyncio
 from pathlib import Path
 from typing import Any, Optional
 
+from rich.align import Align
+from rich.text import Text
 from textual.app import App
 from textual.widgets import Input, RichLog, Static
 from textual.timer import Timer
@@ -67,6 +69,7 @@ class Console(App):
             self._event_bus.on("tool_result", self._on_tool_result)
             self._event_bus.on("approval_required", self._on_approval_required)
             self._event_bus.on("prompt_error", self._on_prompt_error)
+            self._event_bus.on("system_event", self._on_system_event)
 
     def _on_stream_started(self, data):
         self._stop_spinner()
@@ -82,6 +85,12 @@ class Console(App):
             self._rich_log.write(f"[error] {data['error']}")
         else:
             self._rich_log.write(f"[tool] {data['result']}")
+
+    def _on_system_event(self, data: dict[str, Any]) -> None:
+        message = data.get("message", "")
+        text = Text(message, style="dim #888888")
+        centered = Align.center(text)
+        self._rich_log.write(centered)
 
     def _on_prompt_error(self, data):
         self._rich_log.write(f"[error] {data.get('error', 'Unknown error')}")

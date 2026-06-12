@@ -73,6 +73,7 @@ class Console(App):
             self._event_bus.on("approval_required", self._on_approval_required)
             self._event_bus.on("prompt_error", self._on_prompt_error)
             self._event_bus.on("system_event", self._on_system_event)
+            self._event_bus.on("prompt_submitted", self._on_prompt_submitted)
 
     def _write_ai_line(self, content: str, style: str | None = None) -> None:
         if not self._rich_log:
@@ -151,6 +152,9 @@ class Console(App):
     def _on_prompt_error(self, data):
         self._rich_log.write(f"[error] {data.get('error', 'Unknown error')}")
 
+    def _on_prompt_submitted(self, text: str) -> None:
+        self._write_user_prompt(text)
+
     def _on_approval_required(self, data: dict[str, Any]) -> None:
         tool = data.get("tool", "unknown")
         command = data.get("command", "")
@@ -197,7 +201,6 @@ class Console(App):
             else:
                 self._rich_log.write("! Answer y/n to approve or deny the pending request")
         elif self._event_bus:
-            self._write_user_prompt(event.value)
             await self._event_bus.emit("prompt_submitted", event.value)
         else:
             self._rich_log.write("Hello from pacli!")

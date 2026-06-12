@@ -181,3 +181,46 @@ async def test_console_emits_denied_on_n_input():
         assert len(responses) == 1
         assert responses[0]["id"] == "test-3"
         assert responses[0]["approved"] is False
+
+
+async def test_user_prompt_renders_with_prefix_and_color():
+    bus = EventBus()
+    app = Console(event_bus=bus)
+    async with app.run_test() as pilot:
+        input_widget = app.query_one(Input)
+        input_widget.focus()
+        input_widget.value = "hello world"
+        await pilot.press("enter")
+
+        output = app.query_one(RichLog)
+        assert len(output.lines) > 0
+
+        found = False
+        for line in output.lines:
+            line_str = str(line)
+            if "hello world" in line_str:
+                assert "> hello world" in line_str, f"Expected '> hello world' in '{line_str}'"
+                found = True
+                break
+        assert found, "User prompt not found in output"
+
+
+async def test_user_prompt_has_blank_line_separator():
+    bus = EventBus()
+    app = Console(event_bus=bus)
+    async with app.run_test() as pilot:
+        input_widget = app.query_one(Input)
+        input_widget.focus()
+
+        # Submit first prompt
+        input_widget.value = "first"
+        await pilot.press("enter")
+
+        # Submit second prompt
+        input_widget.value = "second"
+        await pilot.press("enter")
+
+        output = app.query_one(RichLog)
+        output_text = "\n".join(str(line) for line in output.lines)
+        assert "> first" in output_text
+        assert "> second" in output_text

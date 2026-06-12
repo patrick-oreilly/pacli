@@ -1,4 +1,4 @@
-import traceback
+import asyncio
 from pathlib import Path
 from typing import Any, Optional
 
@@ -67,7 +67,6 @@ class Console(App):
         self._rich_log: Optional[RichLog] = None
         self._thinking: Optional[Static] = None
         self._hud: Optional[Static] = None
-        self._pending_approvals: dict[str, dict[str, Any]] = {}
         self._is_streaming = False
         self._was_at_bottom = True
         self._in_code_block = False
@@ -77,6 +76,9 @@ class Console(App):
         self._error_active = False
         self._last_prompt = ""
         self._error_line_start = 0
+        self._approval_pending = False
+        self._approval_data: dict[str, Any] = {}
+        self._approval_line_start = 0
 
     def compose(self):
         yield Static(id="thinking", classes="hidden")
@@ -215,10 +217,15 @@ class Console(App):
         self._hud.remove_class("hud-streaming")
 
     def _on_tool_result(self, data):
+        tool = data.get("tool", "unknown")
         if "error" in data:
-            self._rich_log.write(f"[error] {data['error']}")
+            error = data["error"]
+            if error == "Approval denied by user":
+                return
+            self._rich_log.write(f"[dim][#FFB347]▶ {tool} → [error: {error}][/#FFB347][/dim]")
         else:
-            self._rich_log.write(f"[tool] {data['result']}")
+            result = data.get("result", "")
+            self._rich_log.write(f"[dim]▶ {tool} → [{result}][/dim]")
 
     def _on_prompt_error(self, data):
         self._error_active = True
@@ -254,27 +261,53 @@ class Console(App):
             input_widget.value = ""
 
     def _on_approval_required(self, data: dict[str, Any]) -> None:
+        if self._approval_pending:
+            return
         tool = data.get("tool", "unknown")
         command = data.get("command", "")
-        detail = f"'{command}'" if command else tool
-        self._rich_log.write(f"! Approval required: {detail}? (y/n)")
-        if approval_id := data.get("id"):
-            self._pending_approvals[approval_id] = data
+        args_display = f'"{command}"' if command else ""
+        self._approval_pending = True
+        self._approval_data = data
+        self._approval_line_start = len(self._rich_log.lines)
+        self._rich_log.write(f"[#FFB347]⚠ Approval required[/#FFB347]")
+        self._rich_log.write(f"[#FFB347]  Tool: {tool}({args_display})[/#FFB347]")
+        self._rich_log.write(f"[#FFB347]  Blast radius: may modify filesystem state[/#FFB347]")
+        self._rich_log.write(f"[#FFB347]  [y] approve  [n] deny[/#FFB347]")
+        self._bindings.bind("y", "approval_yes", "Approve", priority=True)
+        self._bindings.bind("n", "approval_no", "Deny", priority=True)
+
+    def action_approval_yes(self) -> None:
+        self._resolve_approval(True)
+
+    def action_approval_no(self) -> None:
+        self._resolve_approval(False)
+
+    def _resolve_approval(self, approved: bool) -> None:
+        all_lines = list(self._rich_log.lines)
+        kept = all_lines[:self._approval_line_start]
+        self._rich_log.clear()
+        for line in kept:
+            self._rich_log.write(line.text)
+        tool = self._approval_data.get("tool", "unknown")
+        command = self._approval_data.get("command", "")
+        args_display = f'"{command}"' if command else ""
+        status = "approved" if approved else "denied"
+        self._rich_log.write(f"[dim]▶ {tool}({args_display}) → [{status}][/dim]")
+        approval_id = self._approval_data.get("id")
+        if self._event_bus:
+            asyncio.get_running_loop().create_task(
+                self._event_bus.emit(
+                    "approval_response",
+                    {"id": approval_id, "approved": approved},
+                )
+            )
+        self._bindings.key_to_bindings.pop("y", None)
+        self._bindings.key_to_bindings.pop("n", None)
+        self._approval_pending = False
+        self._approval_data = {}
+
     async def on_input_submitted(self, event: Input.Submitted):
-        if self._pending_approvals:
-            text = event.value.strip().lower()
-            if text in ("y", "yes", "n", "no"):
-                approved = text in ("y", "yes")
-                first_id = next(iter(self._pending_approvals))
-                self._pending_approvals.pop(first_id)
-                if self._event_bus:
-                    await self._event_bus.emit(
-                        "approval_response",
-                        {"id": first_id, "approved": approved},
-                    )
-            else:
-                self._rich_log.write("! Answer y/n to approve or deny the pending request")
-        elif self._error_active:
+        if self._error_active:
             self._vanish_error()
             new_prompt = event.value.strip()
             if new_prompt:

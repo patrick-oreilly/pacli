@@ -101,10 +101,7 @@ async def test_console_emits_approved_on_y_input():
             "approval_required",
             {"id": "test-2", "tool": "execute_shell", "command": "echo hi"},
         )
-        input_widget = app.query_one(Input)
-        input_widget.focus()
-        input_widget.value = "y"
-        await pilot.press("enter")
+        await pilot.press("y")
 
         assert len(responses) == 1
         assert responses[0]["id"] == "test-2"
@@ -120,10 +117,7 @@ async def test_console_emits_denied_on_n_input():
             "approval_required",
             {"id": "test-3", "tool": "execute_shell", "command": "echo hi"},
         )
-        input_widget = app.query_one(Input)
-        input_widget.focus()
-        input_widget.value = "n"
-        await pilot.press("enter")
+        await pilot.press("n")
 
         assert len(responses) == 1
         assert responses[0]["id"] == "test-3"

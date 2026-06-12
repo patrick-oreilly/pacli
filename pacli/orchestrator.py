@@ -4,7 +4,7 @@ from typing import Any
 
 from pacli.events import EventBus
 from pacli.policy import Policy
-from pacli.provider import Provider
+from pacli.provider import Message, Provider
 from pacli.tool_registry import ToolRegistry
 
 APPROVAL_TIMEOUT = 120
@@ -70,8 +70,10 @@ class Orchestrator:
     async def process_prompt(self, prompt: str) -> None:
         await self._event_bus.emit("stream_started")
         try:
-            async for token in self._provider.stream_completion(prompt):
-                await self._event_bus.emit("token_received", token)
+            messages = [Message(role="user", content=prompt)]
+            tool_schemas = self._tool_registry.tool_schemas
+            async for event in self._provider.stream_completion(messages, tool_schemas):
+                await self._event_bus.emit("token_received", event)
         except Exception as e:
             await self._event_bus.emit("prompt_error", {"error": str(e)})
         finally:

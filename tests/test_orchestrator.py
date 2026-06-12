@@ -6,6 +6,7 @@ from pacli.events import EventBus
 from pacli.local_sandbox import LocalSandbox
 from pacli.orchestrator import Orchestrator
 from pacli.policy import Policy
+from pacli.provider import TextToken
 from pacli.tool_registry import ToolRegistry
 from pacli.tools.execute_shell import ExecuteShellTool
 from pacli.tools.read_file import ReadFileTool
@@ -23,9 +24,9 @@ async def test_orchestrator_emits_event_sequence():
     await orchestrator.process_prompt("hello")
     assert events == [
         "stream_started",
-        ("token_received", "Hello"),
-        ("token_received", " from"),
-        ("token_received", " MockAdapter!"),
+        ("token_received", TextToken("Hello")),
+        ("token_received", TextToken(" from")),
+        ("token_received", TextToken(" MockAdapter!")),
         "stream_finished",
     ]
 

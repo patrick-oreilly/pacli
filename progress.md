@@ -6,18 +6,18 @@
 |---|-------|--------|
 | 11 | Epic: Real LLM Provider | 🔵 Open |
 | 12 | Slice 6.1: Provider Data Model & Protocol | 🔵 Open |
-| 13 | Slice 6.2: Config Loading & System Prompt | 🔵 Open |
+| 13 | Slice 6.2: Config Loading & System Prompt | 🟢 Closed → PR #59 |
 | 14 | Slice 6.3: OllamaAdapter | 🔵 Open |
 | 15 | Slice 6.4: Orchestration Loop & Console Rendering | 🔵 Open |
-| 16 | Slice 6.5: Console Slash Commands | 🔵 Open |
+| 16 | Slice 6.5: Console Slash Commands | 🟢 Closed → PR #60 |
 
 ## Epic 1: Canvas & Base Theming
 
 | # | Issue | Status |
 |---|-------|--------|
-| 21 | Epic: Canvas & Base Theming | 🔵 Open |
-| 22 | Console: Apply Deep Space theme and electric cyan palette | 🔵 Open |
-| 23 | Console: Frameless floating input with cyan bottom border | 🔵 Open |
+| 21 | Epic: Canvas & Base Theming | 🟢 Closed |
+| 22 | Console: Apply Deep Space theme and electric cyan palette | 🟢 Closed → PR #58 |
+| 23 | Console: Frameless floating input with cyan bottom border | 🟢 Closed → PR #57 |
 | 24 | Console: Hyper-minimal scrollbar | 🟢 Closed → PR #55 |
 | 25 | Console: Non-blinking vertical bar cursor | 🟢 Closed → PR #54 |
 

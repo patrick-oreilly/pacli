@@ -1,9 +1,13 @@
-from typing import AsyncIterator
+from typing import Any, AsyncIterator
 
-from pacli.provider import Provider
+from pacli.provider import Message, Provider, ProviderEvent, TextToken
 
 
 class MockAdapter:
-    async def stream_completion(self, prompt: str) -> AsyncIterator[str]:
+    async def stream_completion(
+        self,
+        messages: list[Message],
+        tool_schemas: list[dict[str, Any]] | None = None,
+    ) -> AsyncIterator[ProviderEvent]:
         for token in ["Hello", " from", " MockAdapter!"]:
-            yield token
+            yield TextToken(text=token)

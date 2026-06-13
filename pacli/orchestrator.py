@@ -6,6 +6,7 @@ from pacli.chat_chunks import ChatChunks
 from pacli.events import EventBus, EventType
 from pacli.policy import Policy
 from pacli.provider import Message, Provider, TextToken, ToolCall
+from pacli.summarizer import Summarizer, estimate_tokens
 from pacli.tool_registry import ToolRegistry
 
 APPROVAL_TIMEOUT = 120
@@ -25,6 +26,9 @@ class Orchestrator:
         provider_name: str = "mock",
         model_name: str = "mock",
         tools_enabled: bool = False,
+        summary_provider: Provider | None = None,
+        summary_model: str = "",
+        max_chat_history_tokens: int = 64000,
     ) -> None:
         self._provider = provider
         self._event_bus = event_bus
@@ -37,6 +41,9 @@ class Orchestrator:
         self._tools_enabled = tools_enabled
         self._loop_max_iterations = loop_max_iterations
         self._max_reflections = max_reflections
+        self._summary_provider = summary_provider
+        self._summary_model = summary_model
+        self._max_chat_history_tokens = max_chat_history_tokens
         self._pending_approvals: dict[str, asyncio.Future[bool]] = {}
         self._approval_handler = self._on_approval_response
         self._slash_handler = self._on_slash_command
@@ -99,6 +106,7 @@ class Orchestrator:
     async def _do_process_prompt(self, prompt: str) -> None:
         try:
             await self._event_bus.emit(EventType.STREAM_STARTED)
+            success = False
             try:
                 self._chunks.conversation.append(Message(role="user", content=prompt))
                 tool_schemas = self._tool_registry.tool_schemas if self._tools_enabled else None
@@ -151,14 +159,47 @@ class Orchestrator:
                     error_list = "\n".join(f"- {e}" for e in round_errors)
                     reflection_prompt = f"The following errors occurred:\n{error_list}\nPlease fix these issues."
                     self._chunks.conversation.append(Message(role="user", content=reflection_prompt))
+                success = True
             except Exception as e:
                 await self._event_bus.emit(EventType.PROMPT_ERROR, {"error": str(e)})
             finally:
+                if success:
+                    await self._maybe_summarize()
                 await self._event_bus.emit(EventType.STREAM_FINISHED)
         except Exception:
             import traceback
             tb = traceback.format_exc()
             await self._event_bus.emit(EventType.SYSTEM_FAULT, {"traceback": tb})
+
+    async def _maybe_summarize(self) -> None:
+        if self._summary_provider is None or not self._summary_model:
+            return
+
+        messages = self._chunks.all_messages()
+        token_count = estimate_tokens(messages)
+        if token_count <= self._max_chat_history_tokens:
+            return
+
+        await self._event_bus.emit(
+            EventType.SYSTEM_EVENT,
+            {"message": "·· runtime · summarizing conversation"},
+        )
+
+        try:
+            summarizer = Summarizer(self._summary_provider, self._summary_model)
+            summary = await summarizer.summarize(messages)
+
+            summary_tokens = estimate_tokens(summary)
+            if summary_tokens >= token_count:
+                return
+
+            self._chunks.history.extend(summary)
+            self._chunks.conversation = []
+        except Exception:
+            import logging
+            logging.getLogger(__name__).exception(
+                "Summarization failed, preserving conversation"
+            )
 
     async def _on_slash_command(self, data: str) -> None:
         parts = data.split(" ", 1)

@@ -32,6 +32,13 @@ def main():
     else:
         provider = MockAdapter()
 
+    summary_provider = None
+    if cfg.summary_model:
+        if cfg.provider == "ollama":
+            summary_provider = OllamaAdapter(base_url=cfg.base_url, model=cfg.summary_model)
+        else:
+            summary_provider = MockAdapter()
+
     orchestrator = Orchestrator(
         provider=provider,
         event_bus=bus,
@@ -47,6 +54,9 @@ def main():
         provider_name=cfg.provider,
         model_name=cfg.model,
         tools_enabled=cfg.tools_enabled,
+        summary_provider=summary_provider,
+        summary_model=cfg.summary_model,
+        max_chat_history_tokens=cfg.max_chat_history_tokens,
     )
 
     bus.on(EventType.PROMPT_SUBMITTED, orchestrator.process_prompt)

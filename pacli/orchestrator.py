@@ -2,6 +2,7 @@ import asyncio
 from uuid import uuid4
 from typing import Any
 
+from pacli.chat_chunks import ChatChunks
 from pacli.events import EventBus, EventType
 from pacli.policy import Policy
 from pacli.provider import Message, Provider, TextToken, ToolCall
@@ -38,6 +39,9 @@ class Orchestrator:
         self._approval_handler = self._on_approval_response
         self._slash_handler = self._on_slash_command
         self._process_lock = asyncio.Lock()
+        self._chunks = ChatChunks()
+        if self._system_prompt:
+            self._chunks.system.append(Message(role="system", content=self._system_prompt))
         self._event_bus.on(EventType.APPROVAL_RESPONSE, self._approval_handler)
         self._event_bus.on(EventType.SLASH_COMMAND, self._slash_handler)
 
@@ -94,16 +98,13 @@ class Orchestrator:
         try:
             await self._event_bus.emit(EventType.STREAM_STARTED)
             try:
-                messages: list[Message] = []
-                if self._system_prompt:
-                    messages.append(Message(role="system", content=self._system_prompt))
-                messages.append(Message(role="user", content=prompt))
+                self._chunks.conversation.append(Message(role="user", content=prompt))
                 tool_schemas = self._tool_registry.tool_schemas if self._tools_enabled else None
                 for _ in range(self._loop_max_iterations):
                     text_chunks: list[str] = []
                     tool_calls: list[ToolCall] = []
 
-                    async for event in self._provider.stream_completion(messages, tool_schemas):
+                    async for event in self._provider.stream_completion(self._chunks.all_messages(), tool_schemas):
                         if isinstance(event, TextToken):
                             await self._event_bus.emit(EventType.TOKEN_RECEIVED, event)
                             text_chunks.append(event.text)
@@ -112,17 +113,17 @@ class Orchestrator:
 
                     if not tool_calls:
                         assistant_content = "".join(text_chunks) if text_chunks else None
-                        messages.append(Message(role="assistant", content=assistant_content))
+                        self._chunks.conversation.append(Message(role="assistant", content=assistant_content))
                         break
 
                     assistant_content = "".join(text_chunks) if text_chunks else None
-                    messages.append(Message(role="assistant", content=assistant_content, tool_calls=tool_calls))
+                    self._chunks.conversation.append(Message(role="assistant", content=assistant_content, tool_calls=tool_calls))
 
                     for tc in tool_calls:
                         await self._event_bus.emit(EventType.TOOL_USED, {"tool": tc.name, "args": tc.args, "id": tc.id})
                         result, is_error = await self.execute_tool(tc.name, **tc.args)
                         content = f"Error: {result}" if is_error else result
-                        messages.append(Message(role="tool", content=content, tool_call_id=tc.id))
+                        self._chunks.conversation.append(Message(role="tool", content=content, tool_call_id=tc.id))
                 else:
                     await self._event_bus.emit(
                         EventType.TOOL_RESULT,
@@ -173,6 +174,9 @@ class Orchestrator:
                 if hasattr(self._provider, "_model"):
                     self._provider._model = arg
                 message = f"·· runtime · model switched to {arg}"
+        elif cmd in ("/clear", "/reset"):
+            self._chunks.conversation = []
+            message = "·· runtime · conversation history cleared"
         elif cmd == "/tools":
             if arg not in ("on", "off"):
                 message = "·· runtime · usage: /tools on|off"
@@ -180,7 +184,7 @@ class Orchestrator:
                 self._tools_enabled = arg == "on"
                 message = f"·· runtime · tools {'enabled' if self._tools_enabled else 'disabled'}"
         elif cmd == "/help":
-            message = "·· runtime · available commands: /model <name|list>, /provider <name>, /tools on|off, /help"
+            message = "·· runtime · available commands: /model <name|list>, /provider <name>, /tools on|off, /clear, /reset, /help"
         else:
             message = f"·· runtime · unknown command: {cmd}"
 

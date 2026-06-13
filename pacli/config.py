@@ -33,11 +33,14 @@ def _load_config_file(path: Path) -> dict[str, Any]:
     provider_cfg = data.get("provider")
     ollama_cfg: dict[str, Any] = {}
     if isinstance(provider_cfg, dict):
-        result["provider"] = provider_cfg.get("default", "ollama")
+        if "default" in provider_cfg:
+            result["provider"] = provider_cfg["default"]
         ollama_cfg = provider_cfg.get("ollama")
         if isinstance(ollama_cfg, dict):
-            result["base_url"] = ollama_cfg.get("base_url", "http://localhost:11434/v1")
-            result["model"] = ollama_cfg.get("model", "llama3.2")
+            if "base_url" in ollama_cfg:
+                result["base_url"] = ollama_cfg["base_url"]
+            if "model" in ollama_cfg:
+                result["model"] = ollama_cfg["model"]
     loop_max = data.get("loop_max_iterations")
     if not isinstance(loop_max, int):
         loop_max = ollama_cfg.get("loop_max_iterations") if isinstance(ollama_cfg, dict) else None

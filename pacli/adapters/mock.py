@@ -11,3 +11,6 @@ class MockAdapter:
     ) -> AsyncIterator[ProviderEvent]:
         for token in ["Hello", " from", " MockAdapter!"]:
             yield TextToken(text=token)
+
+    async def list_models(self) -> list[str]:
+        return ["mock-model"]

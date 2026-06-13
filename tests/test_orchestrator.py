@@ -189,10 +189,48 @@ async def test_slash_command_model_switch():
         provider=MockAdapter(),
         event_bus=bus,
     )
-    await orchestrator._on_slash_command("/model llama3.2")
+    await orchestrator._on_slash_command("/model mock-model")
 
     assert len(system_events) == 1
-    assert "model switched to llama3.2" in system_events[0]["message"]
+    assert "model switched to mock-model" in system_events[0]["message"]
+    orchestrator.cleanup()
+
+
+async def test_slash_command_model_unknown_rejected():
+    bus = EventBus()
+    system_events = []
+    bus.on("system_event", lambda d: system_events.append(d))
+
+    orchestrator = Orchestrator(
+        provider=MockAdapter(),
+        event_bus=bus,
+    )
+    await orchestrator._on_slash_command("/model nonexistent-model")
+
+    assert len(system_events) == 1
+    assert "unknown model: nonexistent-model" in system_events[0]["message"]
+    assert orchestrator._active_model_name == "mock"
+    orchestrator.cleanup()
+
+
+async def test_slash_command_model_no_list_models_allows_any():
+    bus = EventBus()
+    system_events = []
+    bus.on("system_event", lambda d: system_events.append(d))
+
+    class ProviderWithoutListModels:
+        async def stream_completion(self, messages, tool_schemas=None):
+            if False:
+                yield
+
+    orchestrator = Orchestrator(
+        provider=ProviderWithoutListModels(),
+        event_bus=bus,
+    )
+    await orchestrator._on_slash_command("/model any-model")
+
+    assert len(system_events) == 1
+    assert "model switched to any-model" in system_events[0]["message"]
     orchestrator.cleanup()
 
 

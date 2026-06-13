@@ -570,3 +570,139 @@ async def test_tools_slash_command():
     assert "tools disabled" in system_events[0]["message"]
 
     orchestrator.cleanup()
+
+
+async def test_orchestrator_multi_turn_history():
+    bus = EventBus()
+    captured_messages = []
+
+    class StubProvider:
+        async def stream_completion(self, messages, tool_schemas=None):
+            captured_messages.append(list(messages))
+            yield TextToken(text="response")
+
+    orchestrator = Orchestrator(
+        provider=StubProvider(),
+        event_bus=bus,
+    )
+    
+    await orchestrator.process_prompt("first prompt")
+    await orchestrator.process_prompt("second prompt")
+
+    assert len(captured_messages) == 2
+    msgs1 = captured_messages[0]
+    assert len(msgs1) == 1
+    assert msgs1[0].role == "user"
+    assert msgs1[0].content == "first prompt"
+
+    msgs2 = captured_messages[1]
+    assert len(msgs2) == 3
+    assert msgs2[0].role == "user"
+    assert msgs2[0].content == "first prompt"
+    assert msgs2[1].role == "assistant"
+    assert msgs2[1].content == "response"
+    assert msgs2[2].role == "user"
+    assert msgs2[2].content == "second prompt"
+    orchestrator.cleanup()
+
+
+def test_chat_chunks_all_messages_ordering():
+    from pacli.chat_chunks import ChatChunks
+    from pacli.provider import Message
+
+    chunks = ChatChunks()
+    chunks.system.append(Message(role="system", content="sys"))
+    chunks.context.append(Message(role="user", content="ctx1"))
+    chunks.context.append(Message(role="assistant", content="ctx2"))
+    chunks.history.append(Message(role="user", content="hist1"))
+    chunks.conversation.append(Message(role="user", content="conv1"))
+    chunks.reminder.append(Message(role="system", content="rem"))
+
+    result = chunks.all_messages()
+    assert len(result) == 6
+    assert result[0] == chunks.system[0]
+    assert result[1] == chunks.context[0]
+    assert result[2] == chunks.context[1]
+    assert result[3] == chunks.history[0]
+    assert result[4] == chunks.conversation[0]
+    assert result[5] == chunks.reminder[0]
+
+
+def test_chat_chunks_empty_layers():
+    from pacli.chat_chunks import ChatChunks
+    from pacli.provider import Message
+
+    chunks = ChatChunks()
+    chunks.system.append(Message(role="system", content="sys"))
+    chunks.conversation.append(Message(role="user", content="u"))
+
+    result = chunks.all_messages()
+    assert len(result) == 2
+    assert result[0].role == "system"
+    assert result[1].role == "user"
+
+
+async def test_orchestrator_clear_preserves_system_and_history():
+    bus = EventBus()
+    system_events = []
+    bus.on("system_event", lambda d: system_events.append(d))
+
+    captured_messages = []
+
+    class StubProvider:
+        async def stream_completion(self, messages, tool_schemas=None):
+            captured_messages.append(list(messages))
+            yield TextToken(text="ok")
+
+    orchestrator = Orchestrator(
+        provider=StubProvider(),
+        event_bus=bus,
+        system_prompt="system msg",
+    )
+
+    orchestrator._chunks.history.append(Message(role="user", content="history item"))
+
+    await orchestrator.process_prompt("hello")
+    await orchestrator._on_slash_command("/clear")
+
+    assert orchestrator._chunks.system[0].content == "system msg"
+    assert orchestrator._chunks.history[0].content == "history item"
+    assert orchestrator._chunks.conversation == []
+
+    await orchestrator.process_prompt("after clear")
+
+    assert len(captured_messages) == 2
+    msgs = captured_messages[1]
+    roles = [m.role for m in msgs]
+    contents = [m.content for m in msgs]
+    assert roles == ["system", "user", "user"]
+    assert contents == ["system msg", "history item", "after clear"]
+
+    orchestrator.cleanup()
+
+
+async def test_orchestrator_clear_command():
+
+    bus = EventBus()
+    captured_messages = []
+
+    class StubProvider:
+        async def stream_completion(self, messages, tool_schemas=None):
+            captured_messages.append(list(messages))
+            yield TextToken(text="response")
+
+    orchestrator = Orchestrator(
+        provider=StubProvider(),
+        event_bus=bus,
+    )
+    
+    await orchestrator.process_prompt("first prompt")
+    await orchestrator._on_slash_command("/clear")
+    await orchestrator.process_prompt("second prompt")
+
+    assert len(captured_messages) == 2
+    msgs2 = captured_messages[1]
+    assert len(msgs2) == 1
+    assert msgs2[0].role == "user"
+    assert msgs2[0].content == "second prompt"
+    orchestrator.cleanup()

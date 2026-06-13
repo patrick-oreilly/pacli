@@ -1,8 +1,9 @@
 from pathlib import Path
-from textual.widgets import Input, RichLog, Static
+from textual.widgets import Input, ListItem, RichLog, Static
 from pacli.adapters.mock import MockAdapter
 from pacli.console.app import Console
 from pacli.events import EventBus
+from pacli.orchestrator import Orchestrator
 from pacli.orchestrator import Orchestrator
 
 
@@ -237,12 +238,12 @@ async def test_slash_command_model_displays_system_event():
     async with app.run_test() as pilot:
         input_widget = app.query_one(Input)
         input_widget.focus()
-        input_widget.value = "/model llama3.2"
+        input_widget.value = "/model mock-model"
         await pilot.press("enter")
 
         output = app.query_one(RichLog)
         output_text = "\n".join(str(line) for line in output.lines)
-        assert "model switched to llama3.2" in output_text
+        assert "model switched to mock-model" in output_text
 
 
 async def test_slash_command_help_displays_available_commands():
@@ -495,3 +496,83 @@ async def test_boot_telemetry_writes_context_line_with_model_dir_branch():
         assert "model: MockAdapter" in output_text
         assert "·  dir:" in output_text
         assert "branch:" in output_text
+
+
+async def test_model_picker_shows_on_model_slash():
+    bus = EventBus()
+
+    async def list_models():
+        return ["model-a", "model-b", "model-c"]
+
+    app = Console(event_bus=bus, list_models_callback=list_models)
+    async with app.run_test() as pilot:
+        input_widget = app.query_one(Input)
+        input_widget.focus()
+        input_widget.value = "/model"
+        await pilot.press("enter")
+
+        picker = app.query_one("#model-picker")
+        assert picker is not None
+        items = [w.name for w in picker.query(ListItem)]
+        assert items == ["model-a", "model-b", "model-c"]
+
+
+async def test_model_picker_filters_by_prefix():
+    bus = EventBus()
+
+    async def list_models():
+        return ["gpt-4", "gpt-3.5", "llama3.2", "codellama"]
+
+    app = Console(event_bus=bus, list_models_callback=list_models)
+    async with app.run_test() as pilot:
+        input_widget = app.query_one(Input)
+        input_widget.focus()
+        input_widget.value = "/model gpt"
+        await pilot.press("enter")
+
+        picker = app.query_one("#model-picker")
+        items = [w.name for w in picker.query(ListItem)]
+        assert items == ["gpt-4", "gpt-3.5"]
+
+
+async def test_model_picker_no_matches_shows_error():
+    bus = EventBus()
+    system_events = []
+    bus.on("system_event", lambda d: system_events.append(d))
+
+    async def list_models():
+        return ["model-a"]
+
+    app = Console(event_bus=bus, list_models_callback=list_models)
+    async with app.run_test() as pilot:
+        input_widget = app.query_one(Input)
+        input_widget.focus()
+        input_widget.value = "/model xyz"
+        await pilot.press("enter")
+
+        assert len(system_events) == 1
+        assert "no models matching" in system_events[0]["message"]
+
+
+async def test_slash_command_not_model_goes_through_picker_bypass():
+    bus = EventBus()
+    system_events = []
+    bus.on("system_event", lambda d: system_events.append(d))
+
+    orchestrator = Orchestrator(
+        provider=MockAdapter(),
+        event_bus=bus,
+    )
+
+    async def list_models():
+        return ["a", "b"]
+
+    app = Console(event_bus=bus, list_models_callback=list_models)
+    async with app.run_test() as pilot:
+        input_widget = app.query_one(Input)
+        input_widget.focus()
+        input_widget.value = "/help"
+        await pilot.press("enter")
+
+        assert len(system_events) == 1
+        assert "available commands" in system_events[0]["message"]

@@ -51,6 +51,12 @@ def main():
 
     bus.on(EventType.PROMPT_SUBMITTED, orchestrator.process_prompt)
 
-    app = Console(event_bus=bus, model=cfg.model)
+    async def list_models_cb() -> list[str]:
+        try:
+            return await provider.list_models()
+        except Exception:
+            return []
+
+    app = Console(event_bus=bus, model=cfg.model, list_models_callback=list_models_cb)
     app.run()
     orchestrator.cleanup()

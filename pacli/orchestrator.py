@@ -192,6 +192,15 @@ class Orchestrator:
             elif not arg:
                 message = f"·· runtime · current model: {self._active_model_name} (usage: /model <name>, /model list)"
             else:
+                if hasattr(self._provider, "list_models"):
+                    try:
+                        models = await self._provider.list_models()
+                        if arg not in models:
+                            message = f"·· runtime · unknown model: {arg}"
+                            await self._event_bus.emit(EventType.SYSTEM_EVENT, {"message": message})
+                            return
+                    except Exception:
+                        pass
                 self._active_model_name = arg
                 if hasattr(self._provider, "_model"):
                     self._provider._model = arg

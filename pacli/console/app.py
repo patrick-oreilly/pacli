@@ -2,12 +2,12 @@ import asyncio
 import os
 import subprocess
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Awaitable, Callable, Optional
 
 from rich.text import Text
 from textual.app import App
 from textual.binding import Binding
-from textual.widgets import Input, RichLog, Static
+from textual.widgets import Input, ListItem, ListView, RichLog, Static
 from textual.timer import Timer
 
 from pacli import __version__
@@ -75,6 +75,27 @@ class Console(App):
     .hud-streaming {
         color: #00AAAA;
     }
+
+    #model-picker {
+        dock: bottom;
+        height: auto;
+        max-height: 12;
+        margin: 0 8 1 8;
+        border-bottom: tall $accent;
+        border-top: tall $accent;
+        padding: 0 1;
+        background: #0A0A0F;
+    }
+
+    #model-picker > ListItem {
+        padding: 0 1;
+        color: #B0B0C0;
+    }
+
+    #model-picker > ListItem.--highlight {
+        background: #1A1A2A;
+        color: $accent;
+    }
     """
 
     BINDINGS = [
@@ -85,13 +106,16 @@ class Console(App):
         self,
         event_bus: Optional[EventBus] = None,
         model: Optional[str] = None,
+        list_models_callback: Optional[Callable[[], Awaitable[list[str]]]] = None,
     ) -> None:
         super().__init__()
         self._event_bus = event_bus
         self._model = model or "mock"
+        self._list_models_callback = list_models_callback
         self._rich_log: Optional[RichLog] = None
         self._thinking: Optional[Static] = None
         self._hud: Optional[Static] = None
+        self._model_picker: Optional[ListView] = None
         self._spinner_timer: Optional[Timer] = None
         self._spinner_frame = 0
         self._pending_approvals: dict[str, dict[str, Any]] = {}
@@ -419,14 +443,57 @@ class Console(App):
                 self._rich_log.write(Text(f"▸ {self._last_prompt}", style="bold #B0B0C0"))
                 await self._event_bus.emit(EventType.PROMPT_SUBMITTED, self._last_prompt)
         elif self._event_bus:
-            if event.value.startswith("/"):
-                await self._event_bus.emit(EventType.SLASH_COMMAND, event.value)
+            value = event.value
+            if value.startswith("/model") and self._list_models_callback:
+                await self._show_model_picker(value)
+            elif value.startswith("/"):
+                await self._event_bus.emit(EventType.SLASH_COMMAND, value)
             else:
-                self._last_prompt = event.value
+                self._last_prompt = value
                 self._rich_log.write(Text(""))
-                self._rich_log.write(Text(f"▸ {event.value}", style="bold #B0B0C0"))
-                await self._event_bus.emit(EventType.PROMPT_SUBMITTED, event.value)
+                self._rich_log.write(Text(f"▸ {value}", style="bold #B0B0C0"))
+                await self._event_bus.emit(EventType.PROMPT_SUBMITTED, value)
         else:
             self._rich_log.write("Hello from pacli!")
         event.input.value = ""
         event.input.refresh()
+
+    async def _show_model_picker(self, value: str) -> None:
+        try:
+            models = await self._list_models_callback()
+        except Exception:
+            return
+
+        parts = value.split(" ", 1)
+        prefix = parts[1].strip().lower() if len(parts) > 1 else ""
+
+        if prefix:
+            models = [m for m in models if prefix in m.lower()]
+
+        if not models:
+            await self._event_bus.emit(
+                EventType.SYSTEM_EVENT,
+                {"message": f"·· runtime · no models matching: {prefix}"},
+            )
+            return
+
+        self._model_picker = ListView(
+            *[ListItem(Static(m), name=m) for m in models],
+            id="model-picker",
+        )
+        self.mount(self._model_picker)
+        self.set_focus(self._model_picker)
+
+    async def on_list_view_selected(self, event: ListView.Selected) -> None:
+        if self._model_picker is not None and event.list_view is self._model_picker:
+            model_name = event.item.name or ""
+            if model_name:
+                await self._event_bus.emit(EventType.SLASH_COMMAND, f"/model {model_name}")
+            self._dismiss_model_picker()
+
+    def _dismiss_model_picker(self) -> None:
+        if self._model_picker is not None:
+            self._model_picker.remove()
+            self._model_picker = None
+            input_widget = self.query_one(Input)
+            self.set_focus(input_widget)

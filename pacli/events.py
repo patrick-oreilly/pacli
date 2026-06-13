@@ -19,6 +19,7 @@ class EventType(StrEnum):
     SYSTEM_EVENT = "system_event"
     SYSTEM_FAULT = "system_fault"
     SLASH_COMMAND = "slash_command"
+    REFLECTION = "reflection"
 
 
 class EventBus:
@@ -57,10 +58,6 @@ class EventBus:
         try:
             result = handler(data)
             if asyncio.iscoroutine(result):
-                logger.warning(
-                    "Handler %r returned a coroutine object; did you forget 'await'?",
-                    handler,
-                )
                 await result
         except Exception:
             logger.exception("Handler failed for event")

@@ -309,7 +309,7 @@ async def test_process_prompt_max_iterations_guard():
     results = []
     bus.on("tool_result", lambda d: results.append(d))
 
-    orchestrator = Orchestrator(provider=StubProvider(), event_bus=bus, tool_registry=tool_registry, loop_max_iterations=3)
+    orchestrator = Orchestrator(provider=StubProvider(), event_bus=bus, tool_registry=tool_registry, loop_max_iterations=3, max_reflections=0)
     await orchestrator.process_prompt("test")
 
     max_events = [r for r in results if r.get("tool") == "_loop"]
@@ -705,4 +705,119 @@ async def test_orchestrator_clear_command():
     assert len(msgs2) == 1
     assert msgs2[0].role == "user"
     assert msgs2[0].content == "second prompt"
+    orchestrator.cleanup()
+
+
+async def test_reflection_skipped_when_no_errors():
+    bus = EventBus()
+    reflection_events = []
+    bus.on("reflection", lambda d: reflection_events.append(d))
+
+    class StubProvider:
+        def __init__(self):
+            self.call_count = 0
+
+        async def stream_completion(self, messages, tool_schemas=None):
+            self.call_count += 1
+            if self.call_count == 1:
+                yield ToolCall(id="tc1", name="read_file", args={"path": "test.txt"})
+            else:
+                yield TextToken(text="done")
+
+    tool_registry = ToolRegistry()
+
+    class StubReadFile:
+        name = "read_file"
+        schema = {"type": "function", "function": {"name": "read_file"}}
+
+        async def __call__(self, path: str) -> str:
+            return "file content"
+
+    tool_registry.register_tool(StubReadFile())
+
+    orchestrator = Orchestrator(provider=StubProvider(), event_bus=bus, tool_registry=tool_registry)
+    await orchestrator.process_prompt("read test.txt")
+
+    assert len(reflection_events) == 0
+    orchestrator.cleanup()
+
+
+async def test_reflection_single_success():
+    bus = EventBus()
+    reflection_events = []
+    bus.on("reflection", lambda d: reflection_events.append(d))
+
+    class StubProvider:
+        def __init__(self):
+            self.call_count = 0
+
+        async def stream_completion(self, messages, tool_schemas=None):
+            self.call_count += 1
+            if self.call_count == 1:
+                yield ToolCall(id="tc1", name="read_file", args={"path": "missing.txt"})
+            elif self.call_count == 2:
+                yield TextToken(text="I see an error")
+            elif self.call_count == 3:
+                yield ToolCall(id="tc2", name="read_file", args={"path": "existing.txt"})
+            else:
+                yield TextToken(text="fixed it")
+
+    tool_registry = ToolRegistry()
+
+    class StubReadFile:
+        name = "read_file"
+        schema = {"type": "function", "function": {"name": "read_file"}}
+
+        def __init__(self):
+            self.call_count = 0
+
+        async def __call__(self, path: str) -> str:
+            self.call_count += 1
+            if path == "missing.txt":
+                raise RuntimeError("file not found: missing.txt")
+            return "file content"
+
+    tool_registry.register_tool(StubReadFile())
+
+    orchestrator = Orchestrator(provider=StubProvider(), event_bus=bus, tool_registry=tool_registry)
+    await orchestrator.process_prompt("read file")
+
+    assert len(reflection_events) == 1
+    assert reflection_events[0] == {"round": 1}
+    orchestrator.cleanup()
+
+
+async def test_reflection_max_exhaustion():
+    bus = EventBus()
+    reflection_events = []
+    bus.on("reflection", lambda d: reflection_events.append(d))
+
+    class StubProvider:
+        def __init__(self):
+            self.call_count = 0
+
+        async def stream_completion(self, messages, tool_schemas=None):
+            self.call_count += 1
+            if self.call_count % 2 == 1:
+                yield ToolCall(id=f"tc{self.call_count}", name="read_file", args={"path": "missing.txt"})
+            else:
+                yield TextToken(text="I give up")
+
+    tool_registry = ToolRegistry()
+
+    class StubReadFile:
+        name = "read_file"
+        schema = {"type": "function", "function": {"name": "read_file"}}
+
+        async def __call__(self, path: str) -> str:
+            raise RuntimeError("file not found: missing.txt")
+
+    tool_registry.register_tool(StubReadFile())
+
+    orchestrator = Orchestrator(provider=StubProvider(), event_bus=bus, tool_registry=tool_registry, max_reflections=2)
+    await orchestrator.process_prompt("read missing.txt")
+
+    assert len(reflection_events) == 2
+    assert reflection_events[0] == {"round": 1}
+    assert reflection_events[1] == {"round": 2}
     orchestrator.cleanup()

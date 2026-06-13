@@ -20,6 +20,7 @@ class Orchestrator:
         policy: Policy | None = None,
         provider_factory: dict[str, tuple] | None = None,
         loop_max_iterations: int = 20,
+        max_reflections: int = 3,
         system_prompt: str | None = None,
         provider_name: str = "mock",
         model_name: str = "mock",
@@ -35,6 +36,7 @@ class Orchestrator:
         self._system_prompt = system_prompt
         self._tools_enabled = tools_enabled
         self._loop_max_iterations = loop_max_iterations
+        self._max_reflections = max_reflections
         self._pending_approvals: dict[str, asyncio.Future[bool]] = {}
         self._approval_handler = self._on_approval_response
         self._slash_handler = self._on_slash_command
@@ -100,35 +102,55 @@ class Orchestrator:
             try:
                 self._chunks.conversation.append(Message(role="user", content=prompt))
                 tool_schemas = self._tool_registry.tool_schemas if self._tools_enabled else None
-                for _ in range(self._loop_max_iterations):
-                    text_chunks: list[str] = []
-                    tool_calls: list[ToolCall] = []
 
-                    async for event in self._provider.stream_completion(self._chunks.all_messages(), tool_schemas):
-                        if isinstance(event, TextToken):
-                            await self._event_bus.emit(EventType.TOKEN_RECEIVED, event)
-                            text_chunks.append(event.text)
-                        elif isinstance(event, ToolCall):
-                            tool_calls.append(event)
+                for reflection_round in range(self._max_reflections + 1):
+                    if reflection_round > 0:
+                        await self._event_bus.emit(EventType.REFLECTION, {"round": reflection_round})
 
-                    if not tool_calls:
+                    round_errors: list[str] = []
+
+                    for _ in range(self._loop_max_iterations):
+                        text_chunks: list[str] = []
+                        tool_calls: list[ToolCall] = []
+
+                        async for event in self._provider.stream_completion(self._chunks.all_messages(), tool_schemas):
+                            if isinstance(event, TextToken):
+                                await self._event_bus.emit(EventType.TOKEN_RECEIVED, event)
+                                text_chunks.append(event.text)
+                            elif isinstance(event, ToolCall):
+                                tool_calls.append(event)
+
+                        if not tool_calls:
+                            assistant_content = "".join(text_chunks) if text_chunks else None
+                            self._chunks.conversation.append(Message(role="assistant", content=assistant_content))
+                            break
+
                         assistant_content = "".join(text_chunks) if text_chunks else None
-                        self._chunks.conversation.append(Message(role="assistant", content=assistant_content))
+                        self._chunks.conversation.append(Message(role="assistant", content=assistant_content, tool_calls=tool_calls))
+
+                        for tc in tool_calls:
+                            await self._event_bus.emit(EventType.TOOL_USED, {"tool": tc.name, "args": tc.args, "id": tc.id})
+                            result, is_error = await self.execute_tool(tc.name, **tc.args)
+                            if is_error:
+                                round_errors.append(f"Error: {tc.name}: {result}")
+                            content = f"Error: {result}" if is_error else result
+                            self._chunks.conversation.append(Message(role="tool", content=content, tool_call_id=tc.id))
+                    else:
+                        round_errors.append(f"Exceeded max iterations ({self._loop_max_iterations})")
+                        await self._event_bus.emit(
+                            EventType.TOOL_RESULT,
+                            {"tool": "_loop", "args": {}, "error": f"Exceeded max iterations ({self._loop_max_iterations})"},
+                        )
+
+                    if not round_errors:
                         break
 
-                    assistant_content = "".join(text_chunks) if text_chunks else None
-                    self._chunks.conversation.append(Message(role="assistant", content=assistant_content, tool_calls=tool_calls))
+                    if reflection_round >= self._max_reflections:
+                        break
 
-                    for tc in tool_calls:
-                        await self._event_bus.emit(EventType.TOOL_USED, {"tool": tc.name, "args": tc.args, "id": tc.id})
-                        result, is_error = await self.execute_tool(tc.name, **tc.args)
-                        content = f"Error: {result}" if is_error else result
-                        self._chunks.conversation.append(Message(role="tool", content=content, tool_call_id=tc.id))
-                else:
-                    await self._event_bus.emit(
-                        EventType.TOOL_RESULT,
-                        {"tool": "_loop", "args": {}, "error": f"Exceeded max iterations ({self._loop_max_iterations})"},
-                    )
+                    error_list = "\n".join(f"- {e}" for e in round_errors)
+                    reflection_prompt = f"The following errors occurred:\n{error_list}\nPlease fix these issues."
+                    self._chunks.conversation.append(Message(role="user", content=reflection_prompt))
             except Exception as e:
                 await self._event_bus.emit(EventType.PROMPT_ERROR, {"error": str(e)})
             finally:

@@ -21,7 +21,7 @@ def main():
     sandbox = LocalSandbox(workspace_root=workspace_root)
     read_file_tool = ReadFileTool(sandbox=sandbox)
     shell_tool = ExecuteShellTool(sandbox=sandbox)
-    policy = Policy()
+    policy = Policy(requires_approval_list=cfg.approval_required_tools)
 
     tool_registry = ToolRegistry()
     tool_registry.register_tool(read_file_tool)
@@ -42,6 +42,7 @@ def main():
             "ollama": (OllamaAdapter, cfg.base_url, cfg.model),
         },
         loop_max_iterations=cfg.loop_max_iterations,
+        max_reflections=cfg.max_reflections,
         system_prompt=cfg.load_system_prompt(),
         provider_name=cfg.provider,
         model_name=cfg.model,

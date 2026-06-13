@@ -2,14 +2,14 @@ import json
 from typing import Any, AsyncIterator
 
 from httpx import Timeout
-from openai import AsyncOpenAI
 
+from pacli.adapters.lazy_openai import LazyOpenAI
 from pacli.provider import Message, ProviderEvent, TextToken, ToolCall
 
 
 class OllamaAdapter:
     def __init__(self, base_url: str, model: str) -> None:
-        self._client = AsyncOpenAI(
+        self._client = LazyOpenAI(
             base_url=base_url,
             api_key="ollama",
             timeout=Timeout(connect=10.0, read=120.0, write=30.0, pool=10.0),
